@@ -1,26 +1,198 @@
-@import "tailwindcss";
-
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --bg: #f3f5f7;
+  --pane: #fbfbfc;
+  --line: #d9dde3;
+  --ink: #181d23;
+  --muted: #6f7682;
+  --accent: #2f7286;
+  --accent-quiet: #dceef4;
+  --radius: 12px;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  background: radial-gradient(circle at top right, #e9eef1 0%, var(--bg) 36%);
+  color: var(--ink);
+  font-family: "Avenir Next", "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+.app-shell {
+  height: 100vh;
+  display: grid;
+  grid-template-columns: 300px minmax(380px, 1fr) minmax(440px, 560px);
+  overflow: hidden;
+}
+
+.pane {
+  padding: 18px;
+}
+
+.pane-sidebar,
+.pane-editor {
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+  min-height: 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+.pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.pane-header h2 {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: 0.01em;
+}
+
+.muted {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.tree {
+  display: grid;
+  gap: 10px;
+}
+
+.tree-client {
+  border: 1px solid var(--line);
+  background: var(--pane);
+  border-radius: var(--radius);
+  padding: 8px;
+}
+
+.tree-project {
+  margin-left: 10px;
+  margin-top: 6px;
+  padding-left: 8px;
+  border-left: 2px solid #e6eaee;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tree-item {
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 7px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  width: 100%;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.tree-inline-input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.tree-subitem {
+  font-size: 13px;
+  color: #3d4653;
+}
+
+.tree-campaign {
+  margin-left: 6px;
+  font-size: 13px;
+  color: #546171;
+}
+
+.tree-item:hover {
+  background: #eef3f7;
+}
+
+.tree-item.is-selected {
+  background: var(--accent-quiet);
+  color: #124c5d;
+}
+
+.btn {
+  border: 1px solid #1d5a6c;
+  background: var(--accent);
+  color: white;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.btn-subtle {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: #27303a;
+}
+
+.btn-micro {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: #27303a;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 6px 8px;
+  white-space: nowrap;
+}
+
+.form-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.field span {
+  font-size: 13px;
+  color: #434b56;
+  font-weight: 600;
+}
+
+.field input,
+.field textarea,
+.field select {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  padding: 10px;
+  font: inherit;
+  font-size: 14px;
+}
+
+.field textarea {
+  resize: vertical;
+}
+
+@media (max-width: 1100px) {
+  .app-shell {
+    height: auto;
+    grid-template-columns: 1fr;
+    overflow: visible;
+  }
+
+  .pane-sidebar,
+  .pane-editor {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    overflow-y: visible;
+  }
 }

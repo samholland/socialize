@@ -1,36 +1,64 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+## Socialize (Prototype)
+
+This is a Next.js prototype for ideating and mocking social campaigns with a three-pane workflow:
+
+- Left pane: client > project > campaign tree
+- Middle pane: campaign editor
+- Right pane: live visual mockup with media upload and PNG export
+
+The current version is intentionally client-first and lightweight.
+
+## Current Features
+
+- Manage multiple clients, projects, and campaigns
+- Edit campaign fields:
+  - campaign name
+  - platform
+  - body copy
+  - CTA
+- Live preview canvas
+  - drag-and-drop image/video
+  - click-to-upload media
+  - PNG export of the composed preview
+- CSV export of the selected campaign's text metadata
+- Local persistence in browser `localStorage`
 
 ## Getting Started
 
-First, run the development server:
+Run the development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Then open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Useful commands:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run lint
+npm run build
+```
 
-## Learn More
+## Next Steps (AWS-Backed V1)
 
-To learn more about Next.js, take a look at the following resources:
+Recommended low-ops stack:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- Static app hosting: S3 + CloudFront (or Amplify Hosting)
+- API: API Gateway (HTTP API) + Lambda
+- Database: DynamoDB
+- Media storage: S3 with pre-signed upload URLs
+- Auth (later): Cognito
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Incremental rollout plan:
 
-## Deploy on Vercel
+1. Replace local persistence with API-backed CRUD
+2. Store uploaded media in S3 and persist media keys in DB
+3. Add campaign versioning/history
+4. Add managed authentication and role access
+5. Add server-generated exports only if pixel-perfect output is required
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Notes
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- This prototype currently stores all data in the browser.
+- Uploaded media is not yet persisted across devices/sessions unless you wire S3/API support.
