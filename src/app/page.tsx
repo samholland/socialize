@@ -479,6 +479,100 @@ export default function Home() {
     }));
   }
 
+  function removeCampaignMedia(campaignIds: string[]) {
+    if (campaignIds.length === 0) return;
+    setCampaignMediaById((prev) => {
+      const next = { ...prev };
+      for (const campaignId of campaignIds) {
+        const media = next[campaignId];
+        if (media && media.kind !== "none") {
+          URL.revokeObjectURL(media.url);
+        }
+        delete next[campaignId];
+      }
+      return next;
+    });
+  }
+
+  function deleteClient(clientId: string) {
+    const client = data.clients.find((item) => item.id === clientId);
+    if (!client) return;
+
+    if (!window.confirm(`Delete client "${client.name}" and all of its campaigns/ads?`)) {
+      return;
+    }
+
+    const campaignIds = client.projects.flatMap((project) =>
+      project.campaigns.map((campaign) => campaign.id)
+    );
+    const nextData: AppData = {
+      clients: data.clients.filter((item) => item.id !== clientId),
+    };
+
+    removeCampaignMedia(campaignIds);
+    setData(nextData);
+    setSelection(defaultSelection(nextData));
+    setEditorMode("campaign");
+  }
+
+  function deleteProject(clientId: string, projectId: string) {
+    const client = data.clients.find((item) => item.id === clientId);
+    const project = client?.projects.find((item) => item.id === projectId);
+    if (!project) return;
+
+    if (!window.confirm(`Delete campaign "${project.name}" and all ads under it?`)) {
+      return;
+    }
+
+    const campaignIds = project.campaigns.map((campaign) => campaign.id);
+    const nextData: AppData = {
+      clients: data.clients.map((item) => {
+        if (item.id !== clientId) return item;
+        return {
+          ...item,
+          projects: item.projects.filter((proj) => proj.id !== projectId),
+        };
+      }),
+    };
+
+    removeCampaignMedia(campaignIds);
+    setData(nextData);
+    setSelection(defaultSelection(nextData));
+    setEditorMode("campaign-settings");
+  }
+
+  function deleteCampaign(clientId: string, projectId: string, campaignId: string) {
+    const client = data.clients.find((item) => item.id === clientId);
+    const project = client?.projects.find((item) => item.id === projectId);
+    const campaign = project?.campaigns.find((item) => item.id === campaignId);
+    if (!campaign) return;
+
+    if (!window.confirm(`Delete ad "${campaign.name}"?`)) {
+      return;
+    }
+
+    const nextData: AppData = {
+      clients: data.clients.map((item) => {
+        if (item.id !== clientId) return item;
+        return {
+          ...item,
+          projects: item.projects.map((proj) => {
+            if (proj.id !== projectId) return proj;
+            return {
+              ...proj,
+              campaigns: proj.campaigns.filter((cmp) => cmp.id !== campaignId),
+            };
+          }),
+        };
+      }),
+    };
+
+    removeCampaignMedia([campaignId]);
+    setData(nextData);
+    setSelection(defaultSelection(nextData));
+    setEditorMode("campaign");
+  }
+
   function commitAudienceProfilesDraft() {
     if (!selectedProject) return;
     const nextProfiles = linesToList(audienceProfilesDraft);
@@ -751,6 +845,14 @@ export default function Home() {
                 >
                   + Project
                 </button>
+                <button
+                  type="button"
+                  className="btn btn-micro"
+                  onClick={() => deleteClient(client.id)}
+                  title="Delete client"
+                >
+                  🗑️
+                </button>
               </div>
 
               {client.projects.map((project) => (
@@ -796,6 +898,14 @@ export default function Home() {
                     >
                       + Ad
                     </button>
+                    <button
+                      type="button"
+                      className="btn btn-micro"
+                      onClick={() => deleteProject(client.id, project.id)}
+                      title="Delete campaign"
+                    >
+                      🗑️
+                    </button>
                   </div>
 
                   {project.campaigns.map((campaign) => (
@@ -838,6 +948,16 @@ export default function Home() {
                           {campaign.name}
                         </button>
                       )}
+                      <button
+                        type="button"
+                        className="btn btn-micro"
+                        onClick={() =>
+                          deleteCampaign(client.id, project.id, campaign.id)
+                        }
+                        title="Delete ad"
+                      >
+                        🗑️
+                      </button>
                     </div>
                   ))}
                 </div>

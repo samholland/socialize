@@ -845,6 +845,16 @@ export function PreviewCanvas({
       onDragLeave={onDragLeave}
       style={{ display: "grid", gap: 10 }}
     >
+      <canvas
+        ref={canvasRef}
+        style={{
+          width: "100%",
+          maxWidth: 540,
+          border: "1px solid #ddd",
+          borderRadius: 0,
+          display: "block",
+        }}
+      />
       <label
         style={{
           display: "inline-flex",
@@ -900,16 +910,7 @@ export function PreviewCanvas({
         </span>
       </div>
 
-      <canvas
-        ref={canvasRef}
-        style={{
-          width: "100%",
-          maxWidth: 540,
-          border: "1px solid #ddd",
-          borderRadius: 12,
-          display: "block",
-        }}
-      />
+      
     </div>
   );
 }
