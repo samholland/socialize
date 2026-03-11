@@ -869,10 +869,12 @@ export default function Home() {
         <div className="tree">
           {data.clients.map((client) => {
             const isClientExpanded = expandedClients[client.id] ?? true;
+            const isClientSelected =
+              editorMode === "client" && selection.clientId === client.id;
 
             return (
               <div key={client.id} className="tree-client">
-                <div className="tree-row">
+                <div className={`tree-row tree-row-client ${isClientSelected ? "is-selected" : ""}`}>
                   <button
                     type="button"
                     className="tree-toggle"
@@ -894,7 +896,7 @@ export default function Home() {
                   ) : (
                     <button
                       type="button"
-                      className={`tree-item ${selection.clientId === client.id ? "is-selected" : ""}`}
+                      className="tree-item"
                       onClick={() => {
                         const project = client.projects[0];
                         const campaign = project?.campaigns[0];
@@ -928,7 +930,7 @@ export default function Home() {
                   </button>
                   <button
                     type="button"
-                    className="btn btn-micro"
+                    className="btn btn-micro tree-delete-btn"
                     onClick={() => deleteClient(client.id)}
                     title="Delete client"
                   >
@@ -939,10 +941,16 @@ export default function Home() {
                 {isClientExpanded &&
                   client.projects.map((project) => {
                     const isProjectExpanded = expandedProjects[project.id] ?? true;
+                    const isProjectSelected =
+                      editorMode === "campaign-settings" && selection.projectId === project.id;
 
                     return (
                       <div key={project.id} className="tree-project">
-                        <div className="tree-row">
+                        <div
+                          className={`tree-row tree-row-project ${
+                            isProjectSelected ? "is-selected" : ""
+                          }`}
+                        >
                           <button
                             type="button"
                             className="tree-toggle"
@@ -966,7 +974,7 @@ export default function Home() {
                           ) : (
                             <button
                               type="button"
-                              className={`tree-item tree-subitem ${selection.projectId === project.id ? "is-selected" : ""}`}
+                              className="tree-item tree-subitem"
                               onClick={() => {
                                 const firstCampaign = project.campaigns[0];
                                 setSelection({
@@ -1001,7 +1009,7 @@ export default function Home() {
                           </button>
                           <button
                             type="button"
-                            className="btn btn-micro"
+                            className="btn btn-micro tree-delete-btn"
                             onClick={() => deleteProject(client.id, project.id)}
                             title="Delete campaign"
                           >
@@ -1010,9 +1018,18 @@ export default function Home() {
                         </div>
 
                         {isProjectExpanded &&
-                          project.campaigns.map((campaign) => (
-                            <div key={campaign.id} className="tree-row">
-                              <span className="tree-toggle-spacer" aria-hidden="true" />
+                          project.campaigns.map((campaign) => {
+                            const isCampaignSelected =
+                              editorMode === "campaign" &&
+                              selection.campaignId === campaign.id;
+
+                            return (
+                            <div
+                              key={campaign.id}
+                              className={`tree-row tree-row-campaign ${
+                                isCampaignSelected ? "is-selected" : ""
+                              }`}
+                            >
                               {editingName?.kind === "campaign" &&
                               editingName.clientId === client.id &&
                               editingName.projectId === project.id &&
@@ -1028,7 +1045,7 @@ export default function Home() {
                               ) : (
                                 <button
                                   type="button"
-                                  className={`tree-item tree-campaign ${selection.campaignId === campaign.id ? "is-selected" : ""}`}
+                                  className="tree-item tree-campaign"
                                   onClick={() => {
                                     setSelection({
                                       clientId: client.id,
@@ -1051,7 +1068,7 @@ export default function Home() {
                               )}
                               <button
                                 type="button"
-                                className="btn btn-micro"
+                                className="btn btn-micro tree-delete-btn"
                                 onClick={() =>
                                   deleteCampaign(client.id, project.id, campaign.id)
                                 }
@@ -1060,7 +1077,8 @@ export default function Home() {
                                 🗑️
                               </button>
                             </div>
-                          ))}
+                          );
+                          })}
                       </div>
                     );
                   })}

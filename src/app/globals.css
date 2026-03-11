@@ -57,16 +57,17 @@ body {
 
 .tree {
   display: grid;
-  gap: 6px;
+  gap: 1px;
+  margin: 0 -18px;
 }
 
 .tree-client {
-  padding: 2px 0;
+  padding: 0;
 }
 
 .tree-project {
-  margin-left: 18px;
-  margin-top: 2px;
+  margin-left: 0;
+  margin-top: 0;
   padding-left: 0;
 }
 
@@ -74,6 +75,10 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 34px;
+  padding: 2px 18px;
 }
 
 .tree-toggle {
@@ -95,6 +100,14 @@ body {
   width: 18px;
   height: 18px;
   display: inline-block;
+}
+
+.tree-row-project {
+  padding-left: 36px;
+}
+
+.tree-row-campaign {
+  padding-left: 56px;
 }
 
 .tree-item {
@@ -131,11 +144,14 @@ body {
 }
 
 .tree-item:hover {
-  background: #eef3f7;
+  background: transparent;
 }
 
-.tree-item.is-selected {
+.tree-row.is-selected {
   background: var(--accent-quiet);
+}
+
+.tree-row.is-selected .tree-item {
   color: #124c5d;
 }
 
@@ -169,6 +185,18 @@ body {
 
 .btn-micro:hover {
   background: #e9edf2;
+}
+
+.tree-delete-btn {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.tree-row.is-selected:hover .tree-delete-btn,
+.tree-row.is-selected:focus-within .tree-delete-btn {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .btn-icon {
