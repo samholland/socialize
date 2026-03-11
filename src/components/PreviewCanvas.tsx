@@ -577,23 +577,6 @@ export function PreviewCanvas({
       drawMediaPlaceholder(ctx, mediaRect);
       await drawPlacedMedia(ctx, mediaRect);
 
-      const topFade = ctx.createLinearGradient(0, mediaRect.y, 0, mediaRect.y + 130 * layout.scale);
-      topFade.addColorStop(0, "rgba(0,0,0,0.18)");
-      topFade.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = topFade;
-      ctx.fillRect(mediaRect.x, mediaRect.y, mediaRect.w, 130 * layout.scale);
-
-      const bottomFade = ctx.createLinearGradient(
-        0,
-        mediaRect.y + mediaRect.h - 180 * layout.scale,
-        0,
-        mediaRect.y + mediaRect.h
-      );
-      bottomFade.addColorStop(0, "rgba(0,0,0,0)");
-      bottomFade.addColorStop(1, "rgba(0,0,0,0.15)");
-      ctx.fillStyle = bottomFade;
-      ctx.fillRect(mediaRect.x, mediaRect.y + mediaRect.h - 180 * layout.scale, mediaRect.w, 180 * layout.scale);
-
       drawStoryHeader(ctx, safeClientName, avatarImage);
 
       ctx.fillStyle = "rgba(255,255,255,0.18)";
@@ -647,12 +630,6 @@ export function PreviewCanvas({
 
       drawMediaPlaceholder(ctx, mediaRect);
       await drawPlacedMedia(ctx, mediaRect);
-
-      const fade = ctx.createLinearGradient(0, mediaRect.y, 0, mediaRect.y + mediaRect.h);
-      fade.addColorStop(0, "rgba(0,0,0,0)");
-      fade.addColorStop(1, "rgba(0,0,0,0.32)");
-      ctx.fillStyle = fade;
-      ctx.fillRect(mediaRect.x, mediaRect.y, mediaRect.w, mediaRect.h);
 
       drawCtaBar(
         ctx,

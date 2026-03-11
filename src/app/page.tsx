@@ -89,7 +89,6 @@ const CAMPAIGN_OBJECTIVE_OPTIONS: CampaignObjective[] = [
 const FEED_ASPECT_OPTIONS: MediaAspect[] = ["1:1", "3:4"];
 const EMPTY_PREVIEW_MEDIA: PreviewMedia = { kind: "none" };
 const DEFAULT_CTA_BG_COLOR = "#4f94aa";
-const DEFAULT_CTA_TEXT_COLOR = "#ffffff";
 
 const SHELL_FALLBACK_STYLE = {
   minHeight: "100vh",
@@ -136,6 +135,15 @@ function normalizeHexColor(value: string | undefined, fallback: string): string 
   return fallback;
 }
 
+function getContrastTextColor(bgColor: string): string {
+  const hex = normalizeHexColor(bgColor, DEFAULT_CTA_BG_COLOR);
+  const r = Number.parseInt(hex.slice(1, 3), 16);
+  const g = Number.parseInt(hex.slice(3, 5), 16);
+  const b = Number.parseInt(hex.slice(5, 7), 16);
+  const brightness = 0.299 * r + 0.587 * g + 0.114 * b;
+  return brightness >= 155 ? "#111111" : "#ffffff";
+}
+
 function normalizeObjective(value: unknown): CampaignObjective {
   if (value === "Consideration" || value === "Conversion") {
     return value;
@@ -166,6 +174,7 @@ function newCampaign(
   name: string,
   options?: { defaultCta?: CtaOption; audienceProfile?: string; messagePillar?: string }
 ): Campaign {
+  const ctaBgColor = DEFAULT_CTA_BG_COLOR;
   return {
     id: newId("cmp"),
     name,
@@ -175,8 +184,8 @@ function newCampaign(
     cta: options?.defaultCta ?? "Learn More",
     audienceProfile: options?.audienceProfile ?? "",
     messagePillar: options?.messagePillar ?? "",
-    ctaBgColor: DEFAULT_CTA_BG_COLOR,
-    ctaTextColor: DEFAULT_CTA_TEXT_COLOR,
+    ctaBgColor,
+    ctaTextColor: getContrastTextColor(ctaBgColor),
     updatedAt: nowIso(),
   };
 }
@@ -225,29 +234,29 @@ function normalizeData(data: AppData): AppData {
           typeof (project as { guardrails?: unknown }).guardrails === "string"
             ? (project as { guardrails?: string }).guardrails ?? ""
             : "",
-        campaigns: project.campaigns.map((campaign) => ({
-          ...campaign,
-          mediaAspect: normalizeAspectForPlatform(
-            campaign.platform,
-            (campaign as { mediaAspect?: MediaAspect }).mediaAspect
-          ),
-          audienceProfile:
-            typeof (campaign as { audienceProfile?: unknown }).audienceProfile === "string"
-              ? (campaign as { audienceProfile?: string }).audienceProfile ?? ""
-              : "",
-          messagePillar:
-            typeof (campaign as { messagePillar?: unknown }).messagePillar === "string"
-              ? (campaign as { messagePillar?: string }).messagePillar ?? ""
-              : "",
-          ctaBgColor: normalizeHexColor(
+        campaigns: project.campaigns.map((campaign) => {
+          const ctaBgColor = normalizeHexColor(
             (campaign as { ctaBgColor?: string }).ctaBgColor,
             DEFAULT_CTA_BG_COLOR
-          ),
-          ctaTextColor: normalizeHexColor(
-            (campaign as { ctaTextColor?: string }).ctaTextColor,
-            DEFAULT_CTA_TEXT_COLOR
-          ),
-        })),
+          );
+          return {
+            ...campaign,
+            mediaAspect: normalizeAspectForPlatform(
+              campaign.platform,
+              (campaign as { mediaAspect?: MediaAspect }).mediaAspect
+            ),
+            audienceProfile:
+              typeof (campaign as { audienceProfile?: unknown }).audienceProfile === "string"
+                ? (campaign as { audienceProfile?: string }).audienceProfile ?? ""
+                : "",
+            messagePillar:
+              typeof (campaign as { messagePillar?: unknown }).messagePillar === "string"
+                ? (campaign as { messagePillar?: string }).messagePillar ?? ""
+                : "",
+            ctaBgColor,
+            ctaTextColor: getContrastTextColor(ctaBgColor),
+          };
+        }),
       })),
     })),
   };
@@ -338,19 +347,6 @@ function formatCsvCell(value: string): string {
     return normalized;
   }
   return `"${normalized.replaceAll('"', '""')}"`;
-}
-
-function downloadCsv(filename: string, header: string[], row: string[]) {
-  const csvText = [header.join(","), row.map(formatCsvCell).join(",")].join("\n");
-  const blob = new Blob([csvText], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-
-  setTimeout(() => URL.revokeObjectURL(url), 250);
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -743,40 +739,71 @@ export default function Home() {
     }
   }
 
-  function exportSelectedCampaignCsv() {
-    if (!selected.client || !selected.project || !selected.campaign) {
+  function exportSelectedProjectCsv() {
+    if (!selected.client || !selected.project) {
       return;
     }
 
-    const c = selected.campaign;
+    const projectCampaigns = selected.project.campaigns;
+    if (projectCampaigns.length === 0) {
+      alert("This campaign has no ads to export yet.");
+      return;
+    }
 
-    downloadCsv(
-      `${c.name.replace(/\s+/g, "-").toLowerCase() || "campaign"}.csv`,
+    const header = [
+      "client",
+      "campaign",
+      "objective",
+      "primary_goal",
+      "default_cta",
+      "guardrails",
+      "ad_name",
+      "platform",
+      "media_aspect",
+      "audience_profile",
+      "message_pillar",
+      "primary_text",
+      "cta",
+      "cta_bg_color",
+      "cta_text_color",
+      "updated_at",
+    ];
+
+    const rows = projectCampaigns.map((campaign) =>
       [
-        "client",
-        "project",
-        "campaign",
-        "platform",
-        "media_aspect",
-        "primary_text",
-        "cta",
-        "cta_bg_color",
-        "cta_text_color",
-        "updated_at",
-      ],
-      [
-        selected.client.name,
-        selected.project.name,
-        c.name,
-        c.platform,
-        c.mediaAspect,
-        c.primaryText,
-        c.cta,
-        c.ctaBgColor,
-        c.ctaTextColor,
-        c.updatedAt,
+        selected.client?.name ?? "",
+        selected.project?.name ?? "",
+        selected.project?.objective ?? "",
+        selected.project?.primaryGoal ?? "",
+        selected.project?.defaultCta ?? "",
+        selected.project?.guardrails ?? "",
+        campaign.name,
+        campaign.platform,
+        campaign.mediaAspect,
+        campaign.audienceProfile,
+        campaign.messagePillar,
+        campaign.primaryText,
+        campaign.cta,
+        campaign.ctaBgColor,
+        getContrastTextColor(campaign.ctaBgColor),
+        campaign.updatedAt,
       ]
+        .map(formatCsvCell)
+        .join(",")
     );
+
+    const csvText = [header.join(","), ...rows].join("\n");
+    const blob = new Blob([csvText], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${
+      selected.project.name.replace(/\s+/g, "-").toLowerCase() || "campaign"
+    }-ads.csv`;
+    anchor.click();
+
+    setTimeout(() => URL.revokeObjectURL(url), 250);
   }
 
   async function onClientProfileImagePick(file: File) {
@@ -996,8 +1023,8 @@ export default function Home() {
                 </button>
               </>
             )}
-            {editorMode === "campaign" && (
-              <button type="button" className="btn" onClick={exportSelectedCampaignCsv}>
+            {editorMode === "campaign-settings" && selectedProject && (
+              <button type="button" className="btn" onClick={exportSelectedProjectCsv}>
                 Export CSV
               </button>
             )}
@@ -1185,11 +1212,11 @@ export default function Home() {
         {editorMode === "campaign" && selectedCampaign && (
           <div className="form-grid">
             <label className="field">
-              <span>Campaign Name</span>
+              <span>Ad Name</span>
               <input
                 value={selectedCampaign.name}
                 onChange={(event) => updateCampaign({ name: event.target.value })}
-                placeholder="Campaign name"
+                placeholder="Ad name"
               />
             </label>
 
@@ -1246,47 +1273,51 @@ export default function Home() {
               />
             </label>
 
-            <label className="field">
-              <span>Audience Profile</span>
-              <select
-                value={selectedCampaign.audienceProfile}
-                onChange={(event) => updateCampaign({ audienceProfile: event.target.value })}
-              >
-                <option value="">Select audience profile</option>
-                {audienceProfileOptions.map((profile) => (
-                  <option key={profile} value={profile}>
-                    {profile}
-                  </option>
-                ))}
-                {selectedCampaign.audienceProfile &&
-                  !audienceProfileOptions.includes(selectedCampaign.audienceProfile) && (
-                    <option value={selectedCampaign.audienceProfile}>
-                      {selectedCampaign.audienceProfile} (Custom)
+            {audienceProfileOptions.length > 0 && (
+              <label className="field">
+                <span>Audience Profile</span>
+                <select
+                  value={selectedCampaign.audienceProfile}
+                  onChange={(event) => updateCampaign({ audienceProfile: event.target.value })}
+                >
+                  <option value="">Select audience profile</option>
+                  {audienceProfileOptions.map((profile) => (
+                    <option key={profile} value={profile}>
+                      {profile}
                     </option>
-                  )}
-              </select>
-            </label>
+                  ))}
+                  {selectedCampaign.audienceProfile &&
+                    !audienceProfileOptions.includes(selectedCampaign.audienceProfile) && (
+                      <option value={selectedCampaign.audienceProfile}>
+                        {selectedCampaign.audienceProfile} (Custom)
+                      </option>
+                    )}
+                </select>
+              </label>
+            )}
 
-            <label className="field">
-              <span>Message Pillar</span>
-              <select
-                value={selectedCampaign.messagePillar}
-                onChange={(event) => updateCampaign({ messagePillar: event.target.value })}
-              >
-                <option value="">Select message pillar</option>
-                {messagePillarOptions.map((pillar) => (
-                  <option key={pillar} value={pillar}>
-                    {pillar}
-                  </option>
-                ))}
-                {selectedCampaign.messagePillar &&
-                  !messagePillarOptions.includes(selectedCampaign.messagePillar) && (
-                    <option value={selectedCampaign.messagePillar}>
-                      {selectedCampaign.messagePillar} (Custom)
+            {messagePillarOptions.length > 0 && (
+              <label className="field">
+                <span>Message Pillar</span>
+                <select
+                  value={selectedCampaign.messagePillar}
+                  onChange={(event) => updateCampaign({ messagePillar: event.target.value })}
+                >
+                  <option value="">Select message pillar</option>
+                  {messagePillarOptions.map((pillar) => (
+                    <option key={pillar} value={pillar}>
+                      {pillar}
                     </option>
-                  )}
-              </select>
-            </label>
+                  ))}
+                  {selectedCampaign.messagePillar &&
+                    !messagePillarOptions.includes(selectedCampaign.messagePillar) && (
+                      <option value={selectedCampaign.messagePillar}>
+                        {selectedCampaign.messagePillar} (Custom)
+                      </option>
+                    )}
+                </select>
+              </label>
+            )}
 
             <label className="field">
               <span>CTA</span>
@@ -1307,16 +1338,13 @@ export default function Home() {
               <input
                 type="color"
                 value={selectedCampaign.ctaBgColor}
-                onChange={(event) => updateCampaign({ ctaBgColor: event.target.value })}
-              />
-            </label>
-
-            <label className="field">
-              <span>CTA Text Color</span>
-              <input
-                type="color"
-                value={selectedCampaign.ctaTextColor}
-                onChange={(event) => updateCampaign({ ctaTextColor: event.target.value })}
+                onChange={(event) => {
+                  const nextBgColor = event.target.value;
+                  updateCampaign({
+                    ctaBgColor: nextBgColor,
+                    ctaTextColor: getContrastTextColor(nextBgColor),
+                  });
+                }}
               />
             </label>
           </div>
@@ -1333,7 +1361,7 @@ export default function Home() {
           primaryText={selected.campaign?.primaryText ?? ""}
           cta={selected.campaign?.cta ?? "Learn More"}
           ctaBgColor={selected.campaign?.ctaBgColor ?? DEFAULT_CTA_BG_COLOR}
-          ctaTextColor={selected.campaign?.ctaTextColor ?? DEFAULT_CTA_TEXT_COLOR}
+          ctaTextColor={getContrastTextColor(selected.campaign?.ctaBgColor ?? DEFAULT_CTA_BG_COLOR)}
           platform={selected.campaign?.platform ?? "Instagram Feed"}
           mediaAspect={selected.campaign?.mediaAspect ?? "1:1"}
           clientName={selectedClient?.name ?? "Client"}
