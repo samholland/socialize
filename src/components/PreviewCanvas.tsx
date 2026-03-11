@@ -855,16 +855,6 @@ export function PreviewCanvas({
         <span>...or drag &amp; drop onto the preview</span>
       </label>
 
-      {media.kind === "video" && (
-        <video
-          ref={videoRef}
-          src={media.url}
-          controls
-          playsInline
-          style={{ width: "100%", maxWidth: 460, borderRadius: 10, border: "1px solid #ddd" }}
-        />
-      )}
-
       <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
         <button
           onClick={exportPNG}
@@ -886,6 +876,18 @@ export function PreviewCanvas({
           Exports exactly what you see in the preview.
         </span>
       </div>
+
+      {media.kind === "video" && (
+        <video
+          ref={videoRef}
+          src={media.url}
+          controls
+          playsInline
+          style={{ width: "100%", maxWidth: 460, borderRadius: 10, border: "1px solid #ddd" }}
+        />
+      )}
+
+      
 
       
     </div>

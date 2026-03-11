@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import { PreviewCanvas, type PreviewMedia } from "@/components/PreviewCanvas";
 
 type Platform =
@@ -370,6 +371,8 @@ export default function Home() {
   const [selection, setSelection] = useState<Selection>(initialWorkspace.selection);
   const [editorMode, setEditorMode] = useState<EditorMode>("campaign");
   const [editingName, setEditingName] = useState<EditingName | null>(null);
+  const [expandedClients, setExpandedClients] = useState<Record<string, boolean>>({});
+  const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
   const [campaignSettingsDraftByProjectId, setCampaignSettingsDraftByProjectId] = useState<
     Record<string, { audienceProfilesText: string; messagePillarsText: string }>
   >({});
@@ -490,6 +493,20 @@ export default function Home() {
     });
   }
 
+  function toggleClientExpanded(clientId: string) {
+    setExpandedClients((prev) => ({
+      ...prev,
+      [clientId]: !(prev[clientId] ?? true),
+    }));
+  }
+
+  function toggleProjectExpanded(projectId: string) {
+    setExpandedProjects((prev) => ({
+      ...prev,
+      [projectId]: !(prev[projectId] ?? true),
+    }));
+  }
+
   function deleteClient(clientId: string) {
     const client = data.clients.find((item) => item.id === clientId);
     if (!client) return;
@@ -506,6 +523,18 @@ export default function Home() {
     };
 
     removeCampaignMedia(campaignIds);
+    setExpandedClients((prev) => {
+      const next = { ...prev };
+      delete next[clientId];
+      return next;
+    });
+    setExpandedProjects((prev) => {
+      const next = { ...prev };
+      for (const project of client.projects) {
+        delete next[project.id];
+      }
+      return next;
+    });
     setData(nextData);
     setSelection(defaultSelection(nextData));
     setEditorMode("campaign");
@@ -532,6 +561,11 @@ export default function Home() {
     };
 
     removeCampaignMedia(campaignIds);
+    setExpandedProjects((prev) => {
+      const next = { ...prev };
+      delete next[projectId];
+      return next;
+    });
     setData(nextData);
     setSelection(defaultSelection(nextData));
     setEditorMode("campaign-settings");
@@ -833,164 +867,206 @@ export default function Home() {
         <p className="muted">Double-click a name to rename it inline.</p>
 
         <div className="tree">
-          {data.clients.map((client) => (
-            <div key={client.id} className="tree-client">
-              <div className="tree-row">
-                {editingName?.kind === "client" && editingName.clientId === client.id ? (
-                  <input
-                    className="tree-inline-input"
-                    value={editingName.value}
-                    onChange={(event) => updateEditingName(event.target.value)}
-                    onBlur={commitInlineEdit}
-                    onKeyDown={onInlineEditKeyDown}
-                    autoFocus
-                  />
-                ) : (
+          {data.clients.map((client) => {
+            const isClientExpanded = expandedClients[client.id] ?? true;
+
+            return (
+              <div key={client.id} className="tree-client">
+                <div className="tree-row">
                   <button
                     type="button"
-                    className={`tree-item ${selection.clientId === client.id ? "is-selected" : ""}`}
-                    onClick={() => {
-                      const project = client.projects[0];
-                      const campaign = project?.campaigns[0];
-                      setSelection({
-                        clientId: client.id,
-                        projectId: project?.id ?? "",
-                        campaignId: campaign?.id ?? "",
-                      });
-                      setEditorMode("client");
-                    }}
-                    onDoubleClick={() => beginClientEdit(client.id, client.name)}
+                    className="tree-toggle"
+                    onClick={() => toggleClientExpanded(client.id)}
+                    title={isClientExpanded ? "Collapse client" : "Expand client"}
                   >
-                    {client.name}
+                    {isClientExpanded ? "▾" : "▸"}
                   </button>
-                )}
-                <button
-                  type="button"
-                  className="btn btn-micro"
-                  onClick={() => addProject(client.id)}
-                  title="Add project"
-                >
-                  + Project
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-micro"
-                  onClick={() => deleteClient(client.id)}
-                  title="Delete client"
-                >
-                  🗑️
-                </button>
-              </div>
 
-              {client.projects.map((project) => (
-                <div key={project.id} className="tree-project">
-                  <div className="tree-row">
-                    {editingName?.kind === "project" &&
-                    editingName.clientId === client.id &&
-                    editingName.projectId === project.id ? (
-                      <input
-                        className="tree-inline-input"
-                        value={editingName.value}
-                        onChange={(event) => updateEditingName(event.target.value)}
-                        onBlur={commitInlineEdit}
-                        onKeyDown={onInlineEditKeyDown}
-                        autoFocus
-                      />
-                    ) : (
-                      <button
-                        type="button"
-                        className={`tree-item tree-subitem ${selection.projectId === project.id ? "is-selected" : ""}`}
-                        onClick={() => {
-                          const firstCampaign = project.campaigns[0];
-                          setSelection({
-                            clientId: client.id,
-                            projectId: project.id,
-                            campaignId: firstCampaign?.id ?? "",
-                          });
-                          setEditorMode("campaign-settings");
-                        }}
-                        onDoubleClick={() =>
-                          beginProjectEdit(client.id, project.id, project.name)
-                        }
-                      >
-                        {project.name}
-                      </button>
-                    )}
-
+                  {editingName?.kind === "client" && editingName.clientId === client.id ? (
+                    <input
+                      className="tree-inline-input"
+                      value={editingName.value}
+                      onChange={(event) => updateEditingName(event.target.value)}
+                      onBlur={commitInlineEdit}
+                      onKeyDown={onInlineEditKeyDown}
+                      autoFocus
+                    />
+                  ) : (
                     <button
                       type="button"
-                      className="btn btn-micro"
-                      onClick={() => addCampaign(client.id, project.id)}
-                      title="Add campaign"
+                      className={`tree-item ${selection.clientId === client.id ? "is-selected" : ""}`}
+                      onClick={() => {
+                        const project = client.projects[0];
+                        const campaign = project?.campaigns[0];
+                        setSelection({
+                          clientId: client.id,
+                          projectId: project?.id ?? "",
+                          campaignId: campaign?.id ?? "",
+                        });
+                        setEditorMode("client");
+                      }}
+                      onDoubleClick={() => beginClientEdit(client.id, client.name)}
                     >
-                      + Ad
+                      {client.name}
                     </button>
-                    <button
-                      type="button"
-                      className="btn btn-micro"
-                      onClick={() => deleteProject(client.id, project.id)}
-                      title="Delete campaign"
-                    >
-                      🗑️
-                    </button>
-                  </div>
+                  )}
 
-                  {project.campaigns.map((campaign) => (
-                    <div key={campaign.id} className="tree-row">
-                      {editingName?.kind === "campaign" &&
-                      editingName.clientId === client.id &&
-                      editingName.projectId === project.id &&
-                      editingName.campaignId === campaign.id ? (
-                        <input
-                          className="tree-inline-input"
-                          value={editingName.value}
-                          onChange={(event) => updateEditingName(event.target.value)}
-                          onBlur={commitInlineEdit}
-                          onKeyDown={onInlineEditKeyDown}
-                          autoFocus
-                        />
-                      ) : (
-                        <button
-                          type="button"
-                          className={`tree-item tree-campaign ${selection.campaignId === campaign.id ? "is-selected" : ""}`}
-                          onClick={() =>
-                            {
-                              setSelection({
-                                clientId: client.id,
-                                projectId: project.id,
-                                campaignId: campaign.id,
-                              });
-                              setEditorMode("campaign");
-                            }
-                          }
-                          onDoubleClick={() =>
-                            beginCampaignEdit(
-                              client.id,
-                              project.id,
-                              campaign.id,
-                              campaign.name
-                            )
-                          }
-                        >
-                          {campaign.name}
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className="btn btn-micro"
-                        onClick={() =>
-                          deleteCampaign(client.id, project.id, campaign.id)
-                        }
-                        title="Delete ad"
-                      >
-                        🗑️
-                      </button>
-                    </div>
-                  ))}
+                  <button
+                    type="button"
+                    className="btn btn-micro btn-icon"
+                    onClick={() => addProject(client.id)}
+                    title="Add project"
+                    aria-label="Add project"
+                  >
+                    <Image
+                      src="/images/ui_plus.svg"
+                      alt=""
+                      width={11}
+                      height={11}
+                      className="tree-plus-icon"
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-micro"
+                    onClick={() => deleteClient(client.id)}
+                    title="Delete client"
+                  >
+                    🗑️
+                  </button>
                 </div>
-              ))}
-            </div>
-          ))}
+
+                {isClientExpanded &&
+                  client.projects.map((project) => {
+                    const isProjectExpanded = expandedProjects[project.id] ?? true;
+
+                    return (
+                      <div key={project.id} className="tree-project">
+                        <div className="tree-row">
+                          <button
+                            type="button"
+                            className="tree-toggle"
+                            onClick={() => toggleProjectExpanded(project.id)}
+                            title={isProjectExpanded ? "Collapse campaign" : "Expand campaign"}
+                          >
+                            {isProjectExpanded ? "▾" : "▸"}
+                          </button>
+
+                          {editingName?.kind === "project" &&
+                          editingName.clientId === client.id &&
+                          editingName.projectId === project.id ? (
+                            <input
+                              className="tree-inline-input"
+                              value={editingName.value}
+                              onChange={(event) => updateEditingName(event.target.value)}
+                              onBlur={commitInlineEdit}
+                              onKeyDown={onInlineEditKeyDown}
+                              autoFocus
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              className={`tree-item tree-subitem ${selection.projectId === project.id ? "is-selected" : ""}`}
+                              onClick={() => {
+                                const firstCampaign = project.campaigns[0];
+                                setSelection({
+                                  clientId: client.id,
+                                  projectId: project.id,
+                                  campaignId: firstCampaign?.id ?? "",
+                                });
+                                setEditorMode("campaign-settings");
+                              }}
+                              onDoubleClick={() =>
+                                beginProjectEdit(client.id, project.id, project.name)
+                              }
+                            >
+                              {project.name}
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            className="btn btn-micro btn-icon"
+                            onClick={() => addCampaign(client.id, project.id)}
+                            title="Add ad"
+                            aria-label="Add ad"
+                          >
+                            <Image
+                              src="/images/ui_plus.svg"
+                              alt=""
+                              width={11}
+                              height={11}
+                              className="tree-plus-icon"
+                            />
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-micro"
+                            onClick={() => deleteProject(client.id, project.id)}
+                            title="Delete campaign"
+                          >
+                            🗑️
+                          </button>
+                        </div>
+
+                        {isProjectExpanded &&
+                          project.campaigns.map((campaign) => (
+                            <div key={campaign.id} className="tree-row">
+                              <span className="tree-toggle-spacer" aria-hidden="true" />
+                              {editingName?.kind === "campaign" &&
+                              editingName.clientId === client.id &&
+                              editingName.projectId === project.id &&
+                              editingName.campaignId === campaign.id ? (
+                                <input
+                                  className="tree-inline-input"
+                                  value={editingName.value}
+                                  onChange={(event) => updateEditingName(event.target.value)}
+                                  onBlur={commitInlineEdit}
+                                  onKeyDown={onInlineEditKeyDown}
+                                  autoFocus
+                                />
+                              ) : (
+                                <button
+                                  type="button"
+                                  className={`tree-item tree-campaign ${selection.campaignId === campaign.id ? "is-selected" : ""}`}
+                                  onClick={() => {
+                                    setSelection({
+                                      clientId: client.id,
+                                      projectId: project.id,
+                                      campaignId: campaign.id,
+                                    });
+                                    setEditorMode("campaign");
+                                  }}
+                                  onDoubleClick={() =>
+                                    beginCampaignEdit(
+                                      client.id,
+                                      project.id,
+                                      campaign.id,
+                                      campaign.name
+                                    )
+                                  }
+                                >
+                                  {campaign.name}
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                className="btn btn-micro"
+                                onClick={() =>
+                                  deleteCampaign(client.id, project.id, campaign.id)
+                                }
+                                title="Delete ad"
+                              >
+                                🗑️
+                              </button>
+                            </div>
+                          ))}
+                      </div>
+                    );
+                  })}
+              </div>
+            );
+          })}
         </div>
       </aside>
 
