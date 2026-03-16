@@ -864,7 +864,7 @@ export default function Home() {
             + Client
           </button>
         </div>
-        <p className="muted">Double-click a name to rename it inline.</p>
+       
 
         <div className="tree">
           {data.clients.map((client) => {
