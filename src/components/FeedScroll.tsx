@@ -63,64 +63,17 @@ const FAKE_POSTS: {
   },
 ];
 
-function HeartSvg() {
+function IgIcon({ src, size = 20, muted = false }: { src: string; size?: number; muted?: boolean }) {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#262626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
-    </svg>
-  );
-}
-
-function CommentSvg() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#262626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-    </svg>
-  );
-}
-
-function SendSvg() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#262626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="22" y1="2" x2="11" y2="13" />
-      <polygon points="22 2 15 22 11 13 2 9 22 2" />
-    </svg>
-  );
-}
-
-function BookmarkSvg() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#262626" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
-    </svg>
-  );
-}
-
-function HomeSvg() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="#262626" stroke="none">
-      <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z" />
-    </svg>
-  );
-}
-
-function SearchSvgNav() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8e8e8e" strokeWidth="2">
-      <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
-    </svg>
-  );
-}
-
-function ReelsSvg() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8e8e8e" strokeWidth="2">
-      <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
-      <line x1="7" y1="2" x2="7" y2="22" /><line x1="17" y1="2" x2="17" y2="22" />
-      <line x1="2" y1="12" x2="22" y2="12" /><line x1="2" y1="7" x2="7" y2="7" />
-      <line x1="2" y1="17" x2="7" y2="17" /><line x1="17" y1="7" x2="22" y2="7" />
-      <line x1="17" y1="17" x2="22" y2="17" />
-    </svg>
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt=""
+      width={size}
+      height={size}
+      style={{ opacity: muted ? 0.45 : 1, display: "block", objectFit: "contain" }}
+      draggable={false}
+    />
   );
 }
 
@@ -151,9 +104,11 @@ function FakePost({ post }: { post: typeof FAKE_POSTS[0] }) {
         }}
       />
       <div className="feed-post-actions">
-        <HeartSvg /><CommentSvg /><SendSvg />
+        <IgIcon src="/images/ig_heart.svg" size={20} />
+        <IgIcon src="/images/ig_comment.svg" size={20} />
+        <IgIcon src="/images/ig_send.svg" size={20} />
         <div style={{ flex: 1 }} />
-        <BookmarkSvg />
+        <IgIcon src="/images/ig_bookmark.svg" size={20} />
       </div>
       <div className="feed-post-likes">{post.likes} likes</div>
       <div className="feed-post-caption">
@@ -219,8 +174,8 @@ export function FeedScroll({
         {/* IG top bar */}
         <div className="feed-top-bar">
           <span className="feed-top-logo">Instagram</span>
-          <div style={{ display: "flex", gap: 10, color: "#262626" }}>
-            <SendSvg />
+          <div style={{ display: "flex", gap: 10 }}>
+            <IgIcon src="/images/ig_send.svg" size={20} />
           </div>
         </div>
 
@@ -314,9 +269,11 @@ export function FeedScroll({
 
           {/* Actions */}
           <div className="feed-post-actions">
-            <HeartSvg /><CommentSvg /><SendSvg />
+            <IgIcon src="/images/ig_heart.svg" size={20} />
+            <IgIcon src="/images/ig_comment.svg" size={20} />
+            <IgIcon src="/images/ig_send.svg" size={20} />
             <div style={{ flex: 1 }} />
-            <BookmarkSvg />
+            <IgIcon src="/images/ig_bookmark.svg" size={20} />
           </div>
 
           {/* Caption */}
@@ -336,31 +293,11 @@ export function FeedScroll({
 
         {/* Bottom nav */}
         <div className="feed-bottom-nav">
-          <HomeSvg />
-          <SearchSvgNav />
-          <div
-            style={{
-              width: 20,
-              height: 20,
-              border: "1.5px solid #8e8e8e",
-              borderRadius: 4,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <div style={{ width: 10, height: 10, background: "#8e8e8e", borderRadius: 2 }} />
-          </div>
-          <ReelsSvg />
-          <div
-            style={{
-              width: 20,
-              height: 20,
-              borderRadius: "50%",
-              background: "#c4c4c4",
-              border: "1.5px solid #8e8e8e",
-            }}
-          />
+          <IgIcon src="/images/ig_home.svg" size={22} />
+          <IgIcon src="/images/ig_search.svg" size={22} muted />
+          <IgIcon src="/images/ig_newpost.svg" size={22} muted />
+          <IgIcon src="/images/ig_reels.svg" size={22} muted />
+          <IgIcon src="/images/ig_pfp_blank.svg" size={22} muted />
         </div>
       </div>
     </div>

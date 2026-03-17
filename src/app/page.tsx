@@ -601,6 +601,9 @@ export default function Home() {
   // Canvas ref for export
   const canvasRef = useRef<PreviewCanvasHandle>(null);
 
+  // Preview body ref for auto-zoom
+  const previewBodyRef = useRef<HTMLDivElement>(null);
+
   // ── Persistence ────────────────────────────────────────────────
 
   useEffect(() => {
@@ -637,6 +640,24 @@ export default function Home() {
       darkMode ? "dark" : "light"
     );
   }, [darkMode]);
+
+  // Auto-zoom preview to fit pane
+  useEffect(() => {
+    const el = previewBodyRef.current;
+    if (!el) return;
+    const FRAME_W = 300;
+    const FRAME_H = Math.round(300 * (2969 / 1842)); // ≈ 484
+    const compute = () => {
+      const { width, height } = el.getBoundingClientRect();
+      if (!width || !height) return;
+      const zoom = Math.min((width - 32) / FRAME_W, (height - 32) / FRAME_H);
+      setPreviewZoom(Math.min(1.4, Math.max(0.5, +zoom.toFixed(2))));
+    };
+    compute();
+    const ro = new ResizeObserver(compute);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // ── Derived ────────────────────────────────────────────────────
 
@@ -2253,6 +2274,23 @@ export default function Home() {
               Feed
             </button>
           </div>
+          {/* Upload button — always visible */}
+          <label className="btn btn-secondary btn-sm" style={{ cursor: "pointer" }} title="Upload media">
+            <input
+              type="file"
+              accept="image/*,video/*"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const url = URL.createObjectURL(file);
+                const kind = file.type.startsWith("video/") ? "video" : "image";
+                setCampaignMedia(campaign.id, { kind, url } as PreviewMedia);
+                e.target.value = "";
+              }}
+            />
+            ↑ Upload
+          </label>
           <div className="zoom-controls">
             <button
               className="zoom-btn"
@@ -2270,13 +2308,14 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Preview body */}
-        <div className="preview-body">
+        {/* Preview body — ref used for auto-zoom */}
+        <div className="preview-body" ref={previewBodyRef}>
           <div
             className="preview-scaled"
             style={{ transform: `scale(${previewZoom})` }}
           >
-            {feedMode === "feed" ? (
+            {/* Feed view */}
+            <div style={{ display: feedMode === "feed" ? "block" : "none" }}>
               <FeedScroll
                 primaryText={campaign.primaryText}
                 cta={campaign.cta}
@@ -2288,7 +2327,9 @@ export default function Home() {
                 clientAvatarUrl={client.profileImageDataUrl}
                 media={selectedMedia}
               />
-            ) : (
+            </div>
+            {/* Frame view — always mounted so canvasRef export works in both modes */}
+            <div style={{ display: feedMode === "frame" ? "block" : "none" }}>
               <PreviewCanvas
                 ref={canvasRef}
                 primaryText={campaign.primaryText}
@@ -2302,7 +2343,7 @@ export default function Home() {
                 media={selectedMedia}
                 onMediaChange={(m) => setCampaignMedia(campaign.id, m)}
               />
-            )}
+            </div>
           </div>
         </div>
       </div>
