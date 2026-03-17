@@ -1,6 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+
+export type PreviewCanvasHandle = {
+  exportCanvas: () => Promise<Blob | null>;
+};
 
 type MediaAspect = "1:1" | "3:4" | "9:16";
 
@@ -149,7 +153,7 @@ function isStoryLikePlatform(platform: string): boolean {
   return key.includes("story") || key.includes("tiktok");
 }
 
-export function PreviewCanvas({
+export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function PreviewCanvas({
   primaryText,
   cta,
   ctaBgColor,
@@ -160,12 +164,23 @@ export function PreviewCanvas({
   clientAvatarUrl,
   media,
   onMediaChange,
-}: Props) {
+}: Props, ref) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const [isDragging, setIsDragging] = useState(false);
   const [frameVersion, setFrameVersion] = useState(0);
+
+  useImperativeHandle(ref, () => ({
+    async exportCanvas(): Promise<Blob | null> {
+      const canvas = canvasRef.current;
+      if (!canvas) return null;
+      await draw();
+      return new Promise<Blob | null>((resolve) =>
+        canvas.toBlob((b) => resolve(b), "image/png", 1)
+      );
+    },
+  }));
 
   const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const frameImageRef = useRef<HTMLImageElement | null>(null);
@@ -892,4 +907,4 @@ export function PreviewCanvas({
       
     </div>
   );
-}
+});
