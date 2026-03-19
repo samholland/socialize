@@ -136,19 +136,18 @@ export function FeedScroll({
 
   const isStory = platform === "Instagram Story" || platform === "TikTok";
 
-  // Scroll so the ad is visible (2 fake posts above it)
+  // Scroll so the ad is centered — also fires when interactive turns off
   useEffect(() => {
     const screen = screenRef.current;
     const ad = adRef.current;
     if (!screen || !ad) return;
-    // Small delay to allow layout
     const id = setTimeout(() => {
       const adTop = ad.offsetTop;
       const screenH = screen.clientHeight;
       screen.scrollTop = Math.max(0, adTop - screenH * 0.2);
     }, 80);
     return () => clearTimeout(id);
-  }, [platform, mediaAspect, media]);
+  }, [platform, mediaAspect, media, interactive]);
 
   const adAspect = isStory ? "9/16" : mediaAspect === "3:4" ? "3/4" : "1/1";
 

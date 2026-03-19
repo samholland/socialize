@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import type { PreviewMedia } from "./PreviewCanvas";
 
 export type FacebookFeedScrollProps = {
@@ -86,6 +87,22 @@ export function FacebookFeedScroll({
   const WRAPPER_W = 300;
   const WRAPPER_H = Math.round(300 * (2969 / 1842)); // ≈ 484
 
+  const screenRef = useRef<HTMLDivElement>(null);
+  const adRef = useRef<HTMLDivElement>(null);
+
+  // Scroll to the ad post — re-fires when interactive turns off
+  useEffect(() => {
+    const screen = screenRef.current;
+    const ad = adRef.current;
+    if (!screen || !ad) return;
+    const id = setTimeout(() => {
+      const adTop = ad.offsetTop;
+      const screenH = screen.clientHeight;
+      screen.scrollTop = Math.max(0, adTop - screenH * 0.15);
+    }, 80);
+    return () => clearTimeout(id);
+  }, [media, mediaAspect, interactive]);
+
   const hasMedia = media.kind === "image" || media.kind === "video";
   const adAspect = mediaAspect === "3:4" ? "3/4" : "1/1";
 
@@ -106,6 +123,7 @@ export function FacebookFeedScroll({
       {/* Screen */}
       <div
         className="feed-screen fb-screen"
+        ref={screenRef}
         style={interactive ? undefined : { overflow: "hidden", pointerEvents: "none" }}
       >
         {/* Facebook top bar — white bg, blue "facebook" wordmark, SVG icons */}
@@ -162,7 +180,7 @@ export function FacebookFeedScroll({
           <FbFakePoster post={FAKE_FB_POSTS[0]} />
 
           {/* The Ad */}
-          <div className="fb-post fb-ad-post">
+          <div className="fb-post fb-ad-post" ref={adRef}>
             <div className="fb-post-header">
               <div
                 className="fb-avatar"
