@@ -14,6 +14,7 @@ export type FeedScrollProps = {
   clientVerified?: boolean;
   clientAvatarUrl?: string;
   media: PreviewMedia;
+
 };
 
 // Fake posts for the feed background
@@ -130,18 +131,18 @@ export function FeedScroll({
   clientVerified = false,
   clientAvatarUrl,
   media,
+
 }: FeedScrollProps) {
   const screenRef = useRef<HTMLDivElement>(null);
   const adRef = useRef<HTMLDivElement>(null);
 
   const isStory = platform === "Instagram Story" || platform === "TikTok";
 
-  // Scroll so the ad is visible (2 fake posts above it)
+  // Scroll so the ad is visible on mount / media change
   useEffect(() => {
     const screen = screenRef.current;
     const ad = adRef.current;
     if (!screen || !ad) return;
-    // Small delay to allow layout
     const id = setTimeout(() => {
       const adTop = ad.offsetTop;
       const screenH = screen.clientHeight;
@@ -172,7 +173,10 @@ export function FeedScroll({
       />
 
       {/* Scrollable screen */}
-      <div className="feed-screen" ref={screenRef}>
+      <div
+        className="feed-screen"
+        ref={screenRef}
+      >
         {/* IG top bar */}
         <div className="feed-top-bar">
           <span className="feed-top-logo">Instagram</span>

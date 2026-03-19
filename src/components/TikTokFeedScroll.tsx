@@ -10,6 +10,7 @@ export type TikTokFeedScrollProps = {
   clientName: string;
   clientAvatarUrl?: string;
   media: PreviewMedia;
+
 };
 
 export function TikTokFeedScroll({
@@ -20,6 +21,7 @@ export function TikTokFeedScroll({
   clientName,
   clientAvatarUrl,
   media,
+
 }: TikTokFeedScrollProps) {
   const WRAPPER_W = 300;
   const WRAPPER_H = Math.round(300 * (2969 / 1842)); // ≈ 484
@@ -42,7 +44,10 @@ export function TikTokFeedScroll({
       />
 
       {/* Screen */}
-      <div className="feed-screen tt-screen">
+      <div
+        className="feed-screen tt-screen"
+
+      >
         {/* Full-bleed video/media background */}
         <div className="tt-media">
           {hasMedia ? (
