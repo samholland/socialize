@@ -84,6 +84,17 @@ function fillRoundedRect(ctx: CanvasRenderingContext2D, rect: Rect, r: number) {
   ctx.fill();
 }
 
+function strokeRoundedRect(
+  ctx: CanvasRenderingContext2D,
+  rect: Rect,
+  r: number,
+  lineWidth: number
+) {
+  roundedRectPath(ctx, rect.x, rect.y, rect.w, rect.h, r);
+  ctx.lineWidth = lineWidth;
+  ctx.stroke();
+}
+
 function fitText(text: string, maxChars: number): string {
   const trimmed = text.trim();
   if (!trimmed) return "";
@@ -148,6 +159,15 @@ function normalizeHexColor(value: string | undefined, fallback: string): string 
   const trimmed = value.trim();
   if (/^#[0-9a-fA-F]{6}$/.test(trimmed)) return trimmed.toLowerCase();
   return fallback;
+}
+
+function alphaHex(hex: string, alpha: number): string {
+  const normalized = normalizeHexColor(hex, "#000000");
+  const safeAlpha = Math.max(0, Math.min(1, alpha));
+  const channel = Math.round(safeAlpha * 255)
+    .toString(16)
+    .padStart(2, "0");
+  return `${normalized}${channel}`;
 }
 
 function isStoryLikePlatform(platform: string): boolean {
@@ -271,6 +291,92 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     ctx.drawImage(offscreen, rect.x, rect.y, rect.w, rect.h);
   }
 
+  function drawStatusBar(
+    ctx: CanvasRenderingContext2D,
+    tone: "light" | "dark"
+  ) {
+    const s = layout.scale;
+    const fg = tone === "light" ? "#ffffff" : "#1f2430";
+    const muted = tone === "light" ? "rgba(255,255,255,0.35)" : alphaHex(fg, 0.28);
+    const timeX = layout.screen.x + 38 * s;
+    const timeY = layout.screen.y + 34 * s;
+    const batteryW = 28 * s;
+    const batteryH = 14 * s;
+    const batteryX = layout.screen.x + layout.screen.w - 58 * s;
+    const batteryY = layout.screen.y + 17 * s;
+    const capW = 2.5 * s;
+    const capH = 5 * s;
+    const signalRight = batteryX - 10 * s;
+    const signalBaseY = batteryY + batteryH - 1.5 * s;
+    const barW = 4 * s;
+    const barGap = 2.5 * s;
+    const barHeights = [7, 10, 13, 16].map((value) => value * s);
+
+    ctx.fillStyle = fg;
+    ctx.font = `600 ${16 * s}px ${FONT_STACK}`;
+    ctx.fillText("12:13", timeX, timeY);
+
+    barHeights.forEach((height, index) => {
+      const x =
+        signalRight - (barHeights.length - index) * barW - (barHeights.length - 1 - index) * barGap;
+      ctx.fillStyle = index === barHeights.length - 1 ? muted : fg;
+      fillRoundedRect(
+        ctx,
+        {
+          x,
+          y: signalBaseY - height,
+          w: barW,
+          h: height,
+        },
+        1.4 * s
+      );
+    });
+
+    ctx.strokeStyle = fg;
+    strokeRoundedRect(
+      ctx,
+      {
+        x: batteryX,
+        y: batteryY,
+        w: batteryW,
+        h: batteryH,
+      },
+      6 * s,
+      Math.max(1, 1.6 * s)
+    );
+
+    ctx.fillStyle = muted;
+    fillRoundedRect(
+      ctx,
+      {
+        x: batteryX + 2.5 * s,
+        y: batteryY + 2.5 * s,
+        w: batteryW - 7 * s,
+        h: batteryH - 5 * s,
+      },
+      3 * s
+    );
+
+    ctx.fillStyle = fg;
+    fillRoundedRect(
+      ctx,
+      {
+        x: batteryX + 2.5 * s,
+        y: batteryY + 2.5 * s,
+        w: batteryW - 7 * s,
+        h: batteryH - 5 * s,
+      },
+      3 * s
+    );
+
+    ctx.fillRect(
+      batteryX + batteryW + 1.8 * s,
+      batteryY + (batteryH - capH) / 2,
+      capW,
+      capH
+    );
+  }
+
   function drawAvatar(
     ctx: CanvasRenderingContext2D,
     x: number,
@@ -315,18 +421,7 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     const avatarX = layout.screen.x + 28 * s;
     const nameX = avatarX + 28 * s;
 
-    ctx.fillStyle = "#12161d";
-    ctx.font = `600 ${16 * s}px ${FONT_STACK}`;
-    ctx.fillText("12:13", layout.screen.x + 40 * s, layout.screen.y + 36 * s);
-
-    ctx.fillStyle = "#2d3440";
-    ctx.fillRect(layout.screen.x + layout.screen.w - 48 * s, layout.screen.y + 10 * s, 7 * s, 10 * s);
-    ctx.fillRect(layout.screen.x + layout.screen.w - 38 * s, layout.screen.y + 8 * s, 7 * s, 12 * s);
-    ctx.fillRect(layout.screen.x + layout.screen.w - 28 * s, layout.screen.y + 6 * s, 7 * s, 14 * s);
-    ctx.strokeStyle = "#2d3440";
-    ctx.lineWidth = Math.max(1, 1.5 * s);
-    ctx.strokeRect(layout.screen.x + layout.screen.w - 18 * s, layout.screen.y + 8 * s, 12 * s, 8 * s);
-    ctx.fillRect(layout.screen.x + layout.screen.w - 5 * s, layout.screen.y + 11 * s, 2 * s, 3 * s);
+    drawStatusBar(ctx, "dark");
 
     drawAvatar(ctx, avatarX, y + 26 * s, 18 * s, avatarImage);
 
@@ -385,6 +480,7 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
       // Top bar overlay
       ctx.fillStyle = "rgba(0,0,0,0.45)";
       ctx.fillRect(layout.screen.x, layout.screen.y, layout.screen.w, 46 * s);
+      drawStatusBar(ctx, "light");
 
       // Tab strip: dim tabs + "For You" active
       ctx.fillStyle = "rgba(255,255,255,0.45)";
@@ -458,6 +554,7 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
       // Top bar overlay
       ctx.fillStyle = "rgba(0,0,0,0.3)";
       ctx.fillRect(layout.screen.x, layout.screen.y, layout.screen.w, 46 * s);
+      drawStatusBar(ctx, "light");
 
       // "Reels ▾" centered at top
       ctx.fillStyle = "#ffffff";
@@ -500,32 +597,34 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
       }
 
     } else {
+      drawStatusBar(ctx, "light");
+
       // IG Story: progress bar + avatar
       ctx.fillStyle = "rgba(255,255,255,0.45)";
       fillRoundedRect(
         ctx,
         {
           x: layout.screen.x + 14 * s,
-          y: layout.screen.y + 16 * s,
+          y: layout.screen.y + 26 * s,
           w: layout.screen.w - 28 * s,
           h: 3 * s,
         },
         2 * s
       );
 
-      drawAvatar(ctx, layout.screen.x + 32 * s, layout.screen.y + 80 * s, 18 * s, avatarImage);
+      drawAvatar(ctx, layout.screen.x + 32 * s, layout.screen.y + 90 * s, 18 * s, avatarImage);
 
       ctx.fillStyle = "#ffffff";
       ctx.font = `700 ${15 * s}px ${FONT_STACK}`;
-      ctx.fillText(fitText(safeClientName, 18), layout.screen.x + 60 * s, layout.screen.y + 76 * s);
+      ctx.fillText(fitText(safeClientName, 18), layout.screen.x + 60 * s, layout.screen.y + 86 * s);
 
       ctx.fillStyle = "rgba(255,255,255,0.78)";
       ctx.font = `500 ${11 * s}px ${FONT_STACK}`;
-      ctx.fillText("Sponsored", layout.screen.x + 60 * s, layout.screen.y + 92 * s);
+      ctx.fillText("Sponsored", layout.screen.x + 60 * s, layout.screen.y + 102 * s);
 
       ctx.fillStyle = "rgba(255,255,255,0.96)";
       ctx.font = `700 ${20 * s}px ${FONT_STACK}`;
-      ctx.fillText("x", layout.screen.x + layout.screen.w - 24 * s, layout.screen.y + 43 * s);
+      ctx.fillText("x", layout.screen.x + layout.screen.w - 24 * s, layout.screen.y + 53 * s);
     }
   }
 
@@ -534,10 +633,7 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     // White status bar area
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(layout.screen.x, layout.screen.y, layout.screen.w, 14 * s);
-    // Status bar time (dark text on white)
-    ctx.fillStyle = "#1c1e21";
-    ctx.font = `600 ${10 * s}px ${FONT_STACK}`;
-    ctx.fillText("12:13", layout.screen.x + 16 * s, layout.screen.y + 12 * s);
+    drawStatusBar(ctx, "dark");
     // White top bar
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(layout.screen.x, layout.screen.y + 14 * s, layout.screen.w, 34 * s);
