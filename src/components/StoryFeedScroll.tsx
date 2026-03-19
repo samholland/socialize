@@ -10,6 +10,7 @@ export type StoryFeedScrollProps = {
   clientName: string;
   clientAvatarUrl?: string;
   media: PreviewMedia;
+  interactive?: boolean;
 };
 
 // Fake story avatars in the tray above
@@ -28,6 +29,7 @@ export function StoryFeedScroll({
   clientName,
   clientAvatarUrl,
   media,
+  interactive = true,
 }: StoryFeedScrollProps) {
   const WRAPPER_W = 300;
   const WRAPPER_H = Math.round(300 * (2969 / 1842)); // ≈ 484
@@ -49,7 +51,10 @@ export function StoryFeedScroll({
       />
 
       {/* Screen content */}
-      <div className="feed-screen story-screen">
+      <div
+        className="feed-screen story-screen"
+        style={interactive ? undefined : { pointerEvents: "none" }}
+      >
         {/* Story progress bars */}
         <div className="story-progress-bars">
           <div className="story-bar story-bar-done" />

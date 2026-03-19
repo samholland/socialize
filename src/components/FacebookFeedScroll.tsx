@@ -11,6 +11,7 @@ export type FacebookFeedScrollProps = {
   clientName: string;
   clientAvatarUrl?: string;
   media: PreviewMedia;
+  interactive?: boolean;
 };
 
 const FAKE_FB_POSTS = [
@@ -80,6 +81,7 @@ export function FacebookFeedScroll({
   clientName,
   clientAvatarUrl,
   media,
+  interactive = true,
 }: FacebookFeedScrollProps) {
   const WRAPPER_W = 300;
   const WRAPPER_H = Math.round(300 * (2969 / 1842)); // ≈ 484
@@ -102,7 +104,10 @@ export function FacebookFeedScroll({
       />
 
       {/* Screen */}
-      <div className="feed-screen fb-screen">
+      <div
+        className="feed-screen fb-screen"
+        style={interactive ? undefined : { overflow: "hidden", pointerEvents: "none" }}
+      >
         {/* Facebook top bar — white bg, blue "facebook" wordmark, SVG icons */}
         <div className="fb-top-bar">
           {/* Hamburger menu */}

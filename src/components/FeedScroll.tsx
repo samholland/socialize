@@ -13,6 +13,7 @@ export type FeedScrollProps = {
   clientName: string;
   clientAvatarUrl?: string;
   media: PreviewMedia;
+  interactive?: boolean;
 };
 
 // Fake posts for the feed background
@@ -128,6 +129,7 @@ export function FeedScroll({
   clientName,
   clientAvatarUrl,
   media,
+  interactive = true,
 }: FeedScrollProps) {
   const screenRef = useRef<HTMLDivElement>(null);
   const adRef = useRef<HTMLDivElement>(null);
@@ -170,7 +172,11 @@ export function FeedScroll({
       />
 
       {/* Scrollable screen */}
-      <div className="feed-screen" ref={screenRef}>
+      <div
+        className="feed-screen"
+        ref={screenRef}
+        style={interactive ? undefined : { overflow: "hidden", pointerEvents: "none" }}
+      >
         {/* IG top bar */}
         <div className="feed-top-bar">
           <span className="feed-top-logo">Instagram</span>

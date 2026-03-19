@@ -668,9 +668,8 @@ export default function Home() {
   const [pendingUndo, setPendingUndo] = useState<PendingUndo | null>(null);
 
   // Preview
-  const [feedMode, setFeedMode] = useState<"frame" | "feed">("frame");
-  const [frameZoom, setFrameZoom] = useState(1);
-  const [feedZoom, setFeedZoom] = useState(1);
+  const [interactive, setInteractive] = useState(true);
+  const [zoom, setZoom] = useState(1);
 
   // Sidebar search
   const [sidebarSearch, setSidebarSearch] = useState("");
@@ -762,8 +761,7 @@ export default function Home() {
       // Divide by ZOOM_BASE so auto-fit initializes at zoom=1.0 (= 100% display, scale(1.4) visually)
       const rawZoom = Math.min((width - 32) / CONTENT_W, (height - 32) / CONTENT_H);
       const clamped = Math.min(1.4, Math.max(0.35, +(rawZoom / ZOOM_BASE).toFixed(2)));
-      setFrameZoom(clamped);
-      setFeedZoom(clamped);
+      setZoom(clamped);
     };
     compute();
     const ro = new ResizeObserver(compute);
@@ -2366,39 +2364,28 @@ export default function Home() {
       <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
         {/* Toolbar */}
         <div className="preview-toolbar">
-          <div className="toggle-pill">
-            <button
-              className={`toggle-pill-btn${feedMode === "frame" ? " is-active" : ""}`}
-              onClick={() => setFeedMode("frame")}
-            >
-              Frame
-            </button>
-            <button
-              className={`toggle-pill-btn${feedMode === "feed" ? " is-active" : ""}`}
-              onClick={() => setFeedMode("feed")}
-            >
-              Feed
-            </button>
-          </div>
+          <label className="interactive-toggle">
+            <input
+              type="checkbox"
+              checked={interactive}
+              onChange={(e) => setInteractive(e.target.checked)}
+            />
+            <span className="interactive-track">
+              <span className="interactive-thumb" />
+            </span>
+            <span className="interactive-label">Interactive</span>
+          </label>
           <div className="zoom-controls">
             <button
               className="zoom-btn"
-              onClick={() => {
-                if (feedMode === "frame") setFrameZoom((z) => Math.max(0.35, +(z - 0.1).toFixed(1)));
-                else setFeedZoom((z) => Math.max(0.35, +(z - 0.1).toFixed(1)));
-              }}
+              onClick={() => setZoom((z) => Math.max(0.35, +(z - 0.1).toFixed(1)))}
             >
               −
             </button>
-            <span className="zoom-label">
-              {Math.round((feedMode === "frame" ? frameZoom : feedZoom) * 100)}%
-            </span>
+            <span className="zoom-label">{Math.round(zoom * 100)}%</span>
             <button
               className="zoom-btn"
-              onClick={() => {
-                if (feedMode === "frame") setFrameZoom((z) => Math.min(1.4, +(z + 0.1).toFixed(1)));
-                else setFeedZoom((z) => Math.min(1.4, +(z + 0.1).toFixed(1)));
-              }}
+              onClick={() => setZoom((z) => Math.min(1.4, +(z + 0.1).toFixed(1)))}
             >
               +
             </button>
@@ -2410,7 +2397,7 @@ export default function Home() {
           {/* Feed view — routed by platform */}
           <div
             className="preview-scaled"
-            style={{ display: feedMode === "feed" ? "flex" : "none", transform: `scale(${feedZoom * ZOOM_BASE})` }}
+            style={{ transform: `scale(${zoom * ZOOM_BASE})` }}
           >
             {campaign.platform === "Instagram Feed" && (
               <FeedScroll
@@ -2423,6 +2410,7 @@ export default function Home() {
                 clientName={client.name}
                 clientAvatarUrl={client.profileImageDataUrl}
                 media={selectedMedia}
+                interactive={interactive}
               />
             )}
             {campaign.platform === "Instagram Story" && (
@@ -2434,6 +2422,7 @@ export default function Home() {
                 clientName={client.name}
                 clientAvatarUrl={client.profileImageDataUrl}
                 media={selectedMedia}
+                interactive={interactive}
               />
             )}
             {campaign.platform === "Facebook Feed" && (
@@ -2446,6 +2435,7 @@ export default function Home() {
                 clientName={client.name}
                 clientAvatarUrl={client.profileImageDataUrl}
                 media={selectedMedia}
+                interactive={interactive}
               />
             )}
             {campaign.platform === "TikTok" && (
@@ -2457,6 +2447,7 @@ export default function Home() {
                 clientName={client.name}
                 clientAvatarUrl={client.profileImageDataUrl}
                 media={selectedMedia}
+                interactive={interactive}
               />
             )}
             {campaign.platform === "Instagram Reels" && (
@@ -2468,14 +2459,12 @@ export default function Home() {
                 clientName={client.name}
                 clientAvatarUrl={client.profileImageDataUrl}
                 media={selectedMedia}
+                interactive={interactive}
               />
             )}
           </div>
-          {/* Frame view — always mounted so canvasRef export works in both modes */}
-          <div
-            className="preview-scaled"
-            style={{ display: feedMode === "frame" ? "flex" : "none", transform: `scale(${frameZoom * ZOOM_BASE})` }}
-          >
+          {/* PreviewCanvas — hidden but mounted so canvasRef export still works */}
+          <div style={{ display: "none" }}>
             <PreviewCanvas
               ref={canvasRef}
               primaryText={campaign.primaryText}
