@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import html2canvas from "html2canvas";
 import JSZip from "jszip";
 import {
   PreviewCanvas,
@@ -653,6 +654,7 @@ export default function Home() {
   const [data, setData] = useState<AppData>(DEFAULT_EMPTY_DATA);
   const [selection, setSelection] = useState<Selection>(DEFAULT_SELECTION);
   const [selectionLevel, setSelectionLevel] = useState<SelectionLevel>("campaign");
+  const [storageReady, setStorageReady] = useState(false);
 
   // Panel widths: sidebar, editor (preview fills remaining)
   const [panelWidths, setPanelWidths] = useState<[number, number]>([260, 420]);
@@ -673,6 +675,7 @@ export default function Home() {
     setSelectionLevel(wsData.level);
     setPanelWidths(ui.panelWidths);
     setDarkMode(ui.darkMode);
+    setStorageReady(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -707,38 +710,42 @@ export default function Home() {
   // Copy flash
   const [copyFlash, setCopyFlash] = useState(false);
 
-  // Canvas ref for export
   const canvasRef = useRef<PreviewCanvasHandle>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
 
   // Preview body ref for auto-zoom
   const previewBodyRef = useRef<HTMLDivElement>(null);
+  const previewExportRef = useRef<HTMLDivElement>(null);
 
   // ── Persistence ────────────────────────────────────────────────
 
   // Persist workspace list + active workspace id
   useEffect(() => {
+    if (!storageReady) return;
     localStorage.setItem(WORKSPACES_KEY, JSON.stringify(workspaces));
-  }, [workspaces]);
+  }, [storageReady, workspaces]);
 
   useEffect(() => {
+    if (!storageReady) return;
     localStorage.setItem(ACTIVE_WS_KEY, activeWorkspaceId);
-  }, [activeWorkspaceId]);
+  }, [storageReady, activeWorkspaceId]);
 
   // Persist current workspace data
   useEffect(() => {
+    if (!storageReady) return;
     localStorage.setItem(
       WS_DATA_PREFIX + activeWorkspaceId,
       JSON.stringify({ data, selection, level: selectionLevel })
     );
-  }, [data, selection, selectionLevel, activeWorkspaceId]);
+  }, [storageReady, data, selection, selectionLevel, activeWorkspaceId]);
 
   useEffect(() => {
+    if (!storageReady) return;
     localStorage.setItem(
       UI_KEY,
       JSON.stringify({ panelWidths, darkMode })
     );
-  }, [panelWidths, darkMode]);
+  }, [storageReady, panelWidths, darkMode]);
 
   useEffect(() => {
     campaignMediaRef.current = campaignMedia;
@@ -1352,10 +1359,170 @@ export default function Home() {
     triggerDownload(blob, filename);
   }
 
+  function snapshotPreviewVideos(node: HTMLElement): () => void {
+    const restores: Array<() => void> = [];
+    const videos = Array.from(node.querySelectorAll("video"));
+
+    for (const video of videos) {
+      if (!video.videoWidth || !video.videoHeight) continue;
+
+      const frameCanvas = document.createElement("canvas");
+      frameCanvas.width = video.videoWidth;
+      frameCanvas.height = video.videoHeight;
+      const frameCtx = frameCanvas.getContext("2d");
+      if (!frameCtx) continue;
+
+      try {
+        frameCtx.drawImage(video, 0, 0, frameCanvas.width, frameCanvas.height);
+      } catch {
+        continue;
+      }
+
+      const image = document.createElement("img");
+      const computed = window.getComputedStyle(video);
+      image.src = frameCanvas.toDataURL("image/png");
+      image.alt = "";
+      image.draggable = false;
+      image.style.width = computed.width;
+      image.style.height = computed.height;
+      image.style.display = computed.display === "none" ? "block" : computed.display;
+      image.style.objectFit = computed.objectFit;
+      image.style.borderRadius = computed.borderRadius;
+      image.style.maxWidth = computed.maxWidth;
+      image.style.maxHeight = computed.maxHeight;
+      image.style.minWidth = computed.minWidth;
+      image.style.minHeight = computed.minHeight;
+      image.style.flex = computed.flex;
+      image.style.alignSelf = computed.alignSelf;
+      image.style.verticalAlign = computed.verticalAlign;
+
+      const previousDisplay = video.style.display;
+      video.insertAdjacentElement("afterend", image);
+      video.style.display = "none";
+
+      restores.push(() => {
+        image.remove();
+        video.style.display = previousDisplay;
+      });
+    }
+
+    return () => {
+      for (let i = restores.length - 1; i >= 0; i -= 1) {
+        restores[i]();
+      }
+    };
+  }
+
+  async function blobToDataUrl(blob: Blob): Promise<string> {
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result;
+        if (typeof result === "string") resolve(result);
+        else reject(new Error("Failed to read blob as data URL."));
+      };
+      reader.onerror = () => reject(reader.error ?? new Error("Failed to read blob."));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function inlinePreviewImages(node: HTMLElement): Promise<() => void> {
+    const restores: Array<() => void> = [];
+    const images = Array.from(node.querySelectorAll("img"));
+
+    for (const image of images) {
+      const originalSrc = image.getAttribute("src");
+      if (!originalSrc || originalSrc.startsWith("data:")) continue;
+
+      try {
+        const response = await fetch(image.currentSrc || originalSrc);
+        const blob = await response.blob();
+        const dataUrl = await blobToDataUrl(blob);
+        image.setAttribute("src", dataUrl);
+        restores.push(() => image.setAttribute("src", originalSrc));
+      } catch (error) {
+        console.warn("Failed to inline preview image for DOM export.", originalSrc, error);
+      }
+    }
+
+    return () => {
+      for (let i = restores.length - 1; i >= 0; i -= 1) {
+        restores[i]();
+      }
+    };
+  }
+
+  function canvasHasVisiblePixels(canvas: HTMLCanvasElement): boolean {
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return false;
+    const { width, height } = canvas;
+    if (!width || !height) return false;
+
+    const sampleGrid = 12;
+    for (let row = 0; row < sampleGrid; row += 1) {
+      for (let col = 0; col < sampleGrid; col += 1) {
+        const x = Math.min(width - 1, Math.floor((col / (sampleGrid - 1)) * width));
+        const y = Math.min(height - 1, Math.floor((row / (sampleGrid - 1)) * height));
+        const pixel = ctx.getImageData(x, y, 1, 1).data;
+        if (pixel[3] > 0) return true;
+      }
+    }
+
+    return false;
+  }
+
+  async function capturePreviewCanvas(
+    node: HTMLElement,
+    useForeignObjectRendering: boolean
+  ): Promise<HTMLCanvasElement> {
+    const rect = node.getBoundingClientRect();
+    return await html2canvas(node, {
+      backgroundColor: null,
+      scale: 3,
+      useCORS: true,
+      allowTaint: true,
+      logging: false,
+      foreignObjectRendering: useForeignObjectRendering,
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+      windowWidth: Math.round(rect.width),
+      windowHeight: Math.round(rect.height),
+    });
+  }
+
   async function exportFramePng(): Promise<Blob | null> {
-    const handle = canvasRef.current;
-    if (!handle) return null;
-    return handle.exportCanvas();
+    const node = previewExportRef.current;
+    try {
+      if (selectedCampaign?.platform === "Instagram Story") {
+        return await canvasRef.current?.exportCanvas() ?? null;
+      }
+      if (!node) {
+        return await canvasRef.current?.exportCanvas() ?? null;
+      }
+
+      const restoreVideos = snapshotPreviewVideos(node);
+      const restoreImages = await inlinePreviewImages(node);
+      try {
+        if ("fonts" in document) {
+          await document.fonts.ready;
+        }
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+        let canvas = await capturePreviewCanvas(node, true);
+        if (!canvasHasVisiblePixels(canvas)) {
+          canvas = await capturePreviewCanvas(node, false);
+        }
+        return await new Promise<Blob | null>((resolve) =>
+          canvas.toBlob((blob) => resolve(blob), "image/png", 1)
+        );
+      } finally {
+        restoreImages();
+        restoreVideos();
+      }
+    } catch (error) {
+      console.warn("DOM preview export failed, falling back to canvas export.", error);
+      return await canvasRef.current?.exportCanvas() ?? null;
+    }
   }
 
   async function buildCampaignZip(
@@ -2523,73 +2690,69 @@ export default function Home() {
             className="preview-scaled"
             style={{ transform: `scale(${zoom * ZOOM_BASE})` }}
           >
-            {campaign.platform === "Instagram Feed" && (
-              <FeedScroll
-                primaryText={campaign.primaryText}
-                cta={campaign.cta}
-                ctaBgColor={campaign.ctaBgColor}
-                ctaTextColor={campaign.ctaTextColor}
-                platform={campaign.platform}
-                mediaAspect={campaign.mediaAspect}
-                clientName={client.name}
-                clientVerified={client.isVerified}
-                clientAvatarUrl={client.profileImageDataUrl}
-                media={selectedMedia}
-
-              />
-            )}
-            {campaign.platform === "Instagram Story" && (
-              <StoryFeedScroll
-                primaryText={campaign.primaryText}
-                cta={campaign.cta}
-                ctaVisible={campaign.ctaVisible}
-                ctaBgColor={campaign.ctaBgColor}
-                ctaTextColor={campaign.ctaTextColor}
-                clientName={client.name}
-                clientAvatarUrl={client.profileImageDataUrl}
-                media={selectedMedia}
-
-              />
-            )}
-            {campaign.platform === "Facebook Feed" && (
-              <FacebookFeedScroll
-                primaryText={campaign.primaryText}
-                cta={campaign.cta}
-                ctaBgColor={campaign.ctaBgColor}
-                ctaTextColor={campaign.ctaTextColor}
-                mediaAspect={campaign.mediaAspect}
-                clientName={client.name}
-                clientAvatarUrl={client.profileImageDataUrl}
-                media={selectedMedia}
-
-              />
-            )}
-            {campaign.platform === "TikTok" && (
-              <TikTokFeedScroll
-                primaryText={campaign.primaryText}
-                cta={campaign.cta}
-                ctaBgColor={campaign.ctaBgColor}
-                ctaTextColor={campaign.ctaTextColor}
-                clientName={client.name}
-                clientAvatarUrl={client.profileImageDataUrl}
-                media={selectedMedia}
-
-              />
-            )}
-            {campaign.platform === "Instagram Reels" && (
-              <ReelsFeedScroll
-                primaryText={campaign.primaryText}
-                cta={campaign.cta}
-                ctaBgColor={campaign.ctaBgColor}
-                ctaTextColor={campaign.ctaTextColor}
-                clientName={client.name}
-                clientAvatarUrl={client.profileImageDataUrl}
-                media={selectedMedia}
-
-              />
-            )}
+            <div ref={previewExportRef} className="preview-export-surface">
+              {campaign.platform === "Instagram Feed" && (
+                <FeedScroll
+                  primaryText={campaign.primaryText}
+                  cta={campaign.cta}
+                  ctaBgColor={campaign.ctaBgColor}
+                  ctaTextColor={campaign.ctaTextColor}
+                  platform={campaign.platform}
+                  mediaAspect={campaign.mediaAspect}
+                  clientName={client.name}
+                  clientVerified={client.isVerified}
+                  clientAvatarUrl={client.profileImageDataUrl}
+                  media={selectedMedia}
+                />
+              )}
+              {campaign.platform === "Instagram Story" && (
+                <StoryFeedScroll
+                  primaryText={campaign.primaryText}
+                  cta={campaign.cta}
+                  ctaVisible={campaign.ctaVisible}
+                  ctaBgColor={campaign.ctaBgColor}
+                  ctaTextColor={campaign.ctaTextColor}
+                  clientName={client.name}
+                  clientAvatarUrl={client.profileImageDataUrl}
+                  media={selectedMedia}
+                />
+              )}
+              {campaign.platform === "Facebook Feed" && (
+                <FacebookFeedScroll
+                  primaryText={campaign.primaryText}
+                  cta={campaign.cta}
+                  ctaBgColor={campaign.ctaBgColor}
+                  ctaTextColor={campaign.ctaTextColor}
+                  mediaAspect={campaign.mediaAspect}
+                  clientName={client.name}
+                  clientAvatarUrl={client.profileImageDataUrl}
+                  media={selectedMedia}
+                />
+              )}
+              {campaign.platform === "TikTok" && (
+                <TikTokFeedScroll
+                  primaryText={campaign.primaryText}
+                  cta={campaign.cta}
+                  ctaBgColor={campaign.ctaBgColor}
+                  ctaTextColor={campaign.ctaTextColor}
+                  clientName={client.name}
+                  clientAvatarUrl={client.profileImageDataUrl}
+                  media={selectedMedia}
+                />
+              )}
+              {campaign.platform === "Instagram Reels" && (
+                <ReelsFeedScroll
+                  primaryText={campaign.primaryText}
+                  cta={campaign.cta}
+                  ctaBgColor={campaign.ctaBgColor}
+                  ctaTextColor={campaign.ctaTextColor}
+                  clientName={client.name}
+                  clientAvatarUrl={client.profileImageDataUrl}
+                  media={selectedMedia}
+                />
+              )}
+            </div>
           </div>
-          {/* PreviewCanvas — hidden but mounted so canvasRef export still works */}
           <div style={{ display: "none" }}>
             <PreviewCanvas
               ref={canvasRef}

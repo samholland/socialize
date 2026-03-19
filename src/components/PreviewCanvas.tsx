@@ -675,23 +675,28 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     ctx.restore();
   }
 
-  async function drawStoryFooterActions(ctx: CanvasRenderingContext2D, tone: string = "#ffffff") {
+  async function drawStoryFooterActions(
+    ctx: CanvasRenderingContext2D,
+    sx: number,
+    sy: number,
+    ss: number,
+    tone: string = "#ffffff"
+  ) {
     const icons = await Promise.all(
       FEED_ACTION_ICON_PATHS.slice(0, 3).map((path) => loadImageFromUrl(path))
     );
-    const s = layout.scale;
-    const size = 22 * s;
-    const gap = 10 * s;
-    const footerCenterY = layout.screen.y + layout.screen.h - 23 * s;
+    const size = 22 * ss;
+    const gap = 10 * ss;
     const totalWidth = size * 3 + gap * 2;
-    let x = layout.screen.x + layout.screen.w - 12 * s - totalWidth;
+    const y = layout.screen.y + layout.screen.h - 18 * sy - size;
+    let x = layout.screen.x + layout.screen.w - 12 * sx - totalWidth;
 
     for (const icon of icons) {
       if (icon) {
         drawTintedImage(
           ctx,
           icon,
-          { x, y: footerCenterY - size / 2, w: size, h: size },
+          { x, y, w: size, h: size },
           tone
         );
       }
@@ -1000,7 +1005,7 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     );
     ctx.clip();
 
-    if (storyMode) {
+  if (storyMode) {
       const plt = platform.toLowerCase();
       const isInstagramStory =
         plt.includes("story") && !plt.includes("reels") && !plt.includes("tiktok");
@@ -1059,9 +1064,9 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
 
         drawAvatar(
           ctx,
-          layout.screen.x + 24 * sx,
-          layout.screen.y + 54 * sy,
-          14 * ss,
+          layout.screen.x + 19 * sx,
+          layout.screen.y + 45 * sy,
+          9 * ss,
           avatarImage
         );
 
@@ -1069,14 +1074,14 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
         ctx.font = `700 ${9 * ss}px ${FONT_STACK}`;
         ctx.fillText(
           fitText(safeClientName, 20),
-          layout.screen.x + 46 * sx,
-          layout.screen.y + 49 * sy
+          layout.screen.x + 34 * sx,
+          layout.screen.y + 48 * sy
         );
 
         ctx.fillStyle = "rgba(255,255,255,0.95)";
         ctx.font = `500 ${14 * ss}px ${FONT_STACK}`;
-        ctx.fillText("⋯", layout.screen.x + layout.screen.w - 38 * sx, layout.screen.y + 54 * sy);
-        ctx.fillText("×", layout.screen.x + layout.screen.w - 16 * sx, layout.screen.y + 54 * sy);
+        ctx.fillText("⋯", layout.screen.x + layout.screen.w - 28 * sx, layout.screen.y + 48 * sy);
+        ctx.fillText("×", layout.screen.x + layout.screen.w - 12 * sx, layout.screen.y + 48 * sy);
 
         if (primaryText) {
           ctx.fillStyle = "#ffffff";
@@ -1093,10 +1098,10 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
         }
 
         ctx.fillStyle = "#ffffff";
-        ctx.font = `500 ${12 * ss}px ${FONT_STACK}`;
-        ctx.fillText("Ad", layout.screen.x + 12 * sx, layout.screen.y + layout.screen.h - 13 * sy);
+        ctx.font = `500 ${9.5 * ss}px ${FONT_STACK}`;
+        ctx.fillText("Ad", layout.screen.x + 12 * sx, layout.screen.y + layout.screen.h - 16 * sy);
 
-        await drawStoryFooterActions(ctx);
+        await drawStoryFooterActions(ctx, sx, sy, ss);
 
         if (ctaVisible) {
           drawStoryCtaPill(

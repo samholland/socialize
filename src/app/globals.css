@@ -961,6 +961,10 @@ html, body {
   max-width: 540px;
 }
 
+.preview-export-surface {
+  display: inline-block;
+}
+
 /* ─── Feed scroll ────────────────────────────────────────────── */
 
 .feed-wrapper {
@@ -1602,8 +1606,6 @@ html, body {
 
 .story-screen {
   background: #111 !important;
-  display: flex;
-  flex-direction: column;
   position: relative;
   overflow: hidden;
 }
@@ -1694,6 +1696,7 @@ html, body {
   font-size: 9px;
   font-weight: 700;
   color: #fff;
+  letter-spacing: 0;
 }
 
 .story-header-icon {
@@ -1703,9 +1706,18 @@ html, body {
 }
 
 .story-media {
-  flex: 1;
   position: relative;
   overflow: hidden;
+  position: absolute;
+  inset: 0;
+}
+
+.story-media-image {
+  position: absolute;
+  inset: 0;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
 }
 
 .story-top-gradient {
@@ -1720,8 +1732,10 @@ html, body {
 }
 
 .story-media-ad {
-  margin-top: 28px;
-  margin-bottom: 48px;
+  top: 28px;
+  bottom: 48px;
+  left: 0;
+  right: 0;
   border-radius: 0;
 }
 
@@ -1746,6 +1760,7 @@ html, body {
   text-shadow: 0 1px 4px rgba(0,0,0,0.7);
   z-index: 2;
   line-height: 1.4;
+  letter-spacing: 0;
 }
 
 .story-footer-actions {
@@ -1763,8 +1778,8 @@ html, body {
   display: block;
   width: 22px;
   height: 22px;
-  object-fit: contain;
-  filter: brightness(0) invert(1);
+  color: #fff;
+  flex: 0 0 auto;
 }
 
 .story-footer-label {
@@ -1776,6 +1791,7 @@ html, body {
   color: #fff;
   font-size: 9.5px;
   font-weight: 500;
+  letter-spacing: 0;
 }
 
 .story-cta-pill {

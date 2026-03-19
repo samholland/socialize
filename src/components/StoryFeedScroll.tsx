@@ -25,17 +25,62 @@ const FAKE_STORIES = [
 const AD_INDEX = 1;
 const TOTAL = FAKE_STORIES.length + 1; // 4 stories total
 
-function StoryActionIcon({ src, size = 22 }: { src: string; size?: number }) {
+function StoryActionIcon({
+  kind,
+  size = 22,
+}: {
+  kind: "heart" | "comment" | "send";
+  size?: number;
+}) {
+  if (kind === "heart") {
+    return (
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 32 32"
+        fill="currentColor"
+        className="story-action-icon"
+        aria-hidden="true"
+      >
+        <path d="M20.8,7.9c2.7.2,4.8,2.5,4.7,5.2,0,3.1-2.6,5-5.2,7.2-2.5,2.2-3.9,3.5-4.3,3.8-.5-.3-2.1-1.8-4.3-3.8-2.6-2.3-5.2-4.2-5.2-7.2-.1-2.7,2-5.1,4.7-5.2,1.5,0,2.9.7,3.7,1.9.8,1.2,1,1.8,1.1,1.8s.3-.6,1.1-1.8c.8-1.2,2.2-2,3.7-1.9M20.8,5.9c-1.8,0-3.6.7-4.8,2.1-1.2-1.4-2.9-2.2-4.8-2.1-3.8.1-6.8,3.4-6.7,7.2,0,3.6,2.6,5.8,5,8,.3.2.6.5.8.8l1,.9c1.1,1.1,2.3,2.1,3.5,3,.7.4,1.5.4,2.2,0,1.3-1,2.5-2,3.6-3.1l.9-.8c.3-.3.6-.5.9-.8,2.3-2,5-4.3,5-7.9.1-3.8-2.9-7.1-6.7-7.2Z" />
+      </svg>
+    );
+  }
+
+  if (kind === "comment") {
+    return (
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 32 32"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+        className="story-action-icon"
+        aria-hidden="true"
+      >
+        <path d="M24.6 21c3.8-6.7-.9-15-8.6-15-7.7 0-12.5 8.3-8.7 15 2.8 4.8 8.9 6.4 13.7 3.6l4.9 1.4-1.3-5Z" />
+      </svg>
+    );
+  }
+
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src}
-      alt=""
+    <svg
       width={size}
       height={size}
+      viewBox="0 0 32 32"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinejoin="round"
+      strokeLinecap="round"
       className="story-action-icon"
-      draggable={false}
-    />
+      aria-hidden="true"
+    >
+      <path d="M18 24.6l7.8-13.1c1-1.7-.2-3.9-2.2-3.9h-15.1c-2.3 0-3.5 2.8-1.8 4.5l4.8 4.7 1.7 7.1c.6 2.3 3.6 2.7 4.8.7Z" />
+      <line x1="11.5" y1="16.7" x2="19.5" y2="12.2" />
+    </svg>
   );
 }
 
@@ -90,12 +135,9 @@ export function StoryFeedScroll({
           <div className="story-media story-media-ad">
             {hasMedia ? (
               media.kind === "image" ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={media.url}
-                  alt=""
-                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-                  draggable={false}
+                <div
+                  className="story-media-image"
+                  style={{ backgroundImage: `url("${media.url}")` }}
                 />
               ) : (
                 <video
@@ -182,9 +224,9 @@ export function StoryFeedScroll({
           <>
             <div className="story-footer-label">Ad</div>
             <div className="story-footer-actions">
-              <StoryActionIcon src="/images/ig_heart.svg" />
-              <StoryActionIcon src="/images/ig_comment.svg" />
-              <StoryActionIcon src="/images/ig_send.svg" />
+              <StoryActionIcon kind="heart" />
+              <StoryActionIcon kind="comment" />
+              <StoryActionIcon kind="send" />
             </div>
           </>
         )}
