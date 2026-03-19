@@ -68,6 +68,7 @@ type Project = {
 type Client = {
   id: string;
   name: string;
+  isVerified: boolean;
   profileImageDataUrl?: string;
   projects: Project[];
 };
@@ -253,6 +254,10 @@ function normalizeData(data: AppData): AppData {
   return {
     clients: data.clients.map((client) => ({
       ...client,
+      isVerified:
+        typeof (client as { isVerified?: unknown }).isVerified === "boolean"
+          ? (client as { isVerified?: boolean }).isVerified ?? false
+          : false,
       profileImageDataUrl:
         typeof client.profileImageDataUrl === "string"
           ? client.profileImageDataUrl
@@ -925,7 +930,12 @@ export default function Home() {
   function addClient() {
     const id = newId("cl");
     const project = newProject("Project 1", [newCampaign("Ad 1")]);
-    const client: Client = { id, name: "New Client", projects: [project] };
+    const client: Client = {
+      id,
+      name: "New Client",
+      isVerified: false,
+      projects: [project],
+    };
     setData((prev) => ({ clients: [...prev.clients, client] }));
     setSelection({ clientId: id, projectId: project.id, campaignId: project.campaigns[0].id });
     setSelectionLevel("client");
@@ -1087,6 +1097,7 @@ export default function Home() {
       ...client,
       id: newId("cl"),
       name: `${client.name} (Copy)`,
+      isVerified: client.isVerified,
       profileImageDataUrl: client.profileImageDataUrl,
       projects: client.projects.map((p) => ({
         ...p,
@@ -1836,6 +1847,26 @@ export default function Home() {
                 </button>
               )}
             </div>
+            <label
+              style={{
+                marginTop: 12,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                color: "var(--text-2)",
+                fontSize: 14,
+                fontWeight: 600,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={client.isVerified}
+                onChange={(e) =>
+                  updateClient(client.id, { isVerified: e.target.checked })
+                }
+              />
+              Verified account
+            </label>
           </div>
         </div>
 
@@ -2421,6 +2452,7 @@ export default function Home() {
                 platform={campaign.platform}
                 mediaAspect={campaign.mediaAspect}
                 clientName={client.name}
+                clientVerified={client.isVerified}
                 clientAvatarUrl={client.profileImageDataUrl}
                 media={selectedMedia}
               />
@@ -2485,6 +2517,7 @@ export default function Home() {
               platform={campaign.platform}
               mediaAspect={campaign.mediaAspect}
               clientName={client.name}
+              clientVerified={client.isVerified}
               clientAvatarUrl={client.profileImageDataUrl}
               media={selectedMedia}
               onMediaChange={(m) => setCampaignMedia(campaign.id, m)}

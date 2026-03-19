@@ -11,6 +11,7 @@ export type FeedScrollProps = {
   platform: string;
   mediaAspect: "1:1" | "3:4" | "9:16";
   clientName: string;
+  clientVerified?: boolean;
   clientAvatarUrl?: string;
   media: PreviewMedia;
 };
@@ -126,6 +127,7 @@ export function FeedScroll({
   platform,
   mediaAspect,
   clientName,
+  clientVerified = false,
   clientAvatarUrl,
   media,
 }: FeedScrollProps) {
@@ -213,7 +215,7 @@ export function FeedScroll({
             <div className="feed-ad-name-block">
               <span className="feed-ad-username">
                 {trimmedName}
-                <span className="feed-ad-verified" />
+                {clientVerified && <span className="feed-ad-verified" />}
               </span>
               <span className="feed-ad-sponsored">Sponsored</span>
             </div>

@@ -2,8 +2,6 @@
 
 ## Ad layouts
 
-Add the Verified badge icon, and in Client settings an option to toggle on/off
-
 ### FRAME VIEW: 
 
 Instagram Story layout -- Match the Instagram UI exactly. 
@@ -56,4 +54,5 @@ Add a stock images to the sample feed
 Add Group and Private sections to Workspace
  - drag and drop projects between sections
 
- 
+
+

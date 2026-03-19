@@ -1088,12 +1088,13 @@ html, body {
   gap: 3px;
 }
 .feed-ad-verified {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
+  width: 12px;
+  height: 12px;
   background: #0095f6;
   display: inline-block;
   flex-shrink: 0;
+  -webkit-mask: url("/images/ui_verified.svg") center / contain no-repeat;
+  mask: url("/images/ui_verified.svg") center / contain no-repeat;
 }
 .feed-ad-sponsored {
   font-size: 10px;

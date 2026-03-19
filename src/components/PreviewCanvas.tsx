@@ -16,6 +16,7 @@ type Props = {
   platform: string;
   mediaAspect: MediaAspect;
   clientName: string;
+  clientVerified?: boolean;
   clientAvatarUrl?: string;
   media: PreviewMedia;
   onMediaChange: (media: PreviewMedia) => void;
@@ -53,6 +54,7 @@ const FEED_ACTION_ICON_PATHS = [
   "/images/ig_send.svg",
   "/images/ig_bookmark.svg",
 ] as const;
+const VERIFIED_ICON_PATH = "/images/ui_verified.svg";
 
 export type PreviewMedia =
   | { kind: "none" }
@@ -161,6 +163,7 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
   platform,
   mediaAspect,
   clientName,
+  clientVerified = false,
   clientAvatarUrl,
   media,
   onMediaChange,
@@ -246,6 +249,28 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     ctx.drawImage(source, sx, sy, sw, sh, dest.x, dest.y, dest.w, dest.h);
   }
 
+  function drawTintedImage(
+    ctx: CanvasRenderingContext2D,
+    image: HTMLImageElement,
+    rect: Rect,
+    color: string
+  ) {
+    const width = Math.max(1, Math.round(rect.w));
+    const height = Math.max(1, Math.round(rect.h));
+    const offscreen = document.createElement("canvas");
+    offscreen.width = width;
+    offscreen.height = height;
+    const offscreenCtx = offscreen.getContext("2d");
+    if (!offscreenCtx) return;
+
+    offscreenCtx.drawImage(image, 0, 0, width, height);
+    offscreenCtx.globalCompositeOperation = "source-in";
+    offscreenCtx.fillStyle = color;
+    offscreenCtx.fillRect(0, 0, width, height);
+
+    ctx.drawImage(offscreen, rect.x, rect.y, rect.w, rect.h);
+  }
+
   function drawAvatar(
     ctx: CanvasRenderingContext2D,
     x: number,
@@ -282,7 +307,8 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
   function drawFeedHeader(
     ctx: CanvasRenderingContext2D,
     safeClientName: string,
-    avatarImage: HTMLImageElement | null
+    avatarImage: HTMLImageElement | null,
+    verifiedIcon: HTMLImageElement | null
   ) {
     const s = layout.scale;
     const y = layout.screen.y + 44 * s;
@@ -308,11 +334,22 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     ctx.font = `700 ${15 * s}px ${FONT_STACK}`;
     ctx.fillText(safeClientName, nameX, y + 24 * s);
 
-    ctx.fillStyle = "#0a84ff";
-    ctx.beginPath();
-    const checkX = nameX + Math.min(140 * s, ctx.measureText(safeClientName).width + 16 * s);
-    ctx.arc(checkX, y + 19 * s, 5 * s, 0, Math.PI * 2);
-    ctx.fill();
+    if (verifiedIcon) {
+      const iconSize = 12 * s;
+      const iconX =
+        nameX + Math.min(140 * s, ctx.measureText(safeClientName).width + 10 * s);
+      drawTintedImage(
+        ctx,
+        verifiedIcon,
+        {
+          x: iconX,
+          y: y + 13 * s,
+          w: iconSize,
+          h: iconSize,
+        },
+        "#0095f6"
+      );
+    }
 
     ctx.fillStyle = "#67707d";
     ctx.font = `500 ${12 * s}px ${FONT_STACK}`;
@@ -777,6 +814,9 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
 
     const safeClientName = fitText(clientName || "Client", 18);
     const avatarImage = await loadImageFromUrl(clientAvatarUrl);
+    const verifiedIcon = clientVerified && platform === "Instagram Feed"
+      ? await loadImageFromUrl(VERIFIED_ICON_PATH)
+      : null;
     const resolvedCtaBgColor = normalizeHexColor(ctaBgColor, "#4f94aa");
     const resolvedCtaTextColor = normalizeHexColor(ctaTextColor, "#ffffff");
     const storyMode = isStoryLikePlatform(platform);
@@ -859,7 +899,7 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
         ctx.fillRect(layout.screen.x, layout.screen.y, layout.screen.w, layout.screen.h);
         drawFBHeader(ctx);
       } else {
-        drawFeedHeader(ctx, safeClientName, avatarImage);
+      drawFeedHeader(ctx, safeClientName, avatarImage, verifiedIcon);
       }
 
       const headerH = isFacebook ? 80 * layout.scale : 96 * layout.scale;
@@ -941,6 +981,7 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     platform,
     mediaAspect,
     clientName,
+    clientVerified,
     clientAvatarUrl,
     media,
     isDragging,
@@ -949,7 +990,23 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
 
   useEffect(() => {
     if (media.kind === "video") {
-      videoRef.current?.load();
+      const vid = videoRef.current;
+      if (!vid) return;
+
+      vid.load();
+      const tryPlay = () => {
+        void vid.play().catch(() => {
+          // Ignore autoplay rejections; muted inline playback usually succeeds after load.
+        });
+      };
+
+      if (vid.readyState >= 2) {
+        tryPlay();
+        return;
+      }
+
+      vid.addEventListener("loadeddata", tryPlay, { once: true });
+      return () => vid.removeEventListener("loadeddata", tryPlay);
     }
   }, [media]);
 
@@ -1080,6 +1137,19 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
         onChange={onPickFile}
         style={{ display: "none" }}
       />
+
+      {media.kind === "video" && (
+        <video
+          ref={videoRef}
+          src={media.url}
+          muted
+          playsInline
+          autoPlay
+          loop
+          preload="auto"
+          style={{ display: "none" }}
+        />
+      )}
 
       {/* Canvas — click opens file picker when no media */}
       <canvas
