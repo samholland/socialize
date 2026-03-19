@@ -1135,35 +1135,36 @@ html, body {
 
 /* ─── Export Panel ───────────────────────────────────────────── */
 
-.export-overlay {
+/* Transparent backdrop to dismiss export panel */
+.export-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.35);
-  z-index: 100;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  animation: fade-in var(--t) ease;
+  z-index: 99;
 }
 
 .export-panel {
+  position: fixed;
+  top: 50px;
+  right: 16px;
+  width: 320px;
   background: var(--pane);
-  border-radius: var(--r-xl) var(--r-xl) 0 0;
-  width: 100%;
-  max-width: 520px;
-  padding: 0 0 32px;
-  box-shadow: var(--shadow-xl);
-  animation: slide-up 220ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  border-radius: var(--r-lg);
+  padding: 0 0 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.1);
+  z-index: 100;
+  animation: slide-down 180ms ease;
+  border: 1px solid var(--line);
+  max-height: calc(100vh - 70px);
+  overflow-y: auto;
+}
+
+@keyframes slide-down {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .export-handle {
-  width: 36px;
-  height: 4px;
-  background: var(--line-strong);
-  border-radius: 2px;
-  margin: 10px auto 16px;
+  display: none;
 }
 
 .export-context-label {
@@ -1392,6 +1393,1029 @@ html, body {
 @keyframes toast-up {
   from { transform: translateX(-50%) translateY(12px); opacity: 0; }
   to { transform: translateX(-50%) translateY(0); opacity: 1; }
+}
+
+/* ─── Workspace Dropdown ─────────────────────────────────────── */
+
+.ws-dropdown-wrap {
+  position: relative;
+}
+
+.ws-dropdown-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 600;
+  transition: background var(--t);
+}
+
+.ws-dropdown-btn:hover {
+  background: var(--bg);
+}
+
+.ws-dropdown-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 200px;
+  background: var(--pane);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  z-index: 50;
+  padding: 4px 0;
+  animation: slide-down 150ms ease;
+}
+
+.ws-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 14px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--ink-2);
+  text-align: left;
+  transition: background var(--t);
+}
+
+.ws-dropdown-item:hover {
+  background: var(--bg);
+}
+
+.ws-dropdown-item.is-active {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.ws-check {
+  margin-left: auto;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.ws-dropdown-divider {
+  height: 1px;
+  background: var(--line);
+  margin: 4px 0;
+}
+
+.ws-dropdown-new {
+  color: var(--accent);
+}
+
+/* ─── IG Story Simulator ─────────────────────────────────────── */
+
+.story-screen {
+  background: #111 !important;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+
+.story-progress-bars {
+  display: flex;
+  gap: 3px;
+  padding: 22px 8px 4px;
+  position: relative;
+  z-index: 2;
+}
+
+.story-bar {
+  flex: 1;
+  height: 2px;
+  border-radius: 1px;
+  overflow: hidden;
+}
+
+.story-bar-done {
+  background: rgba(255,255,255,0.9);
+}
+
+.story-bar-active {
+  background: rgba(255,255,255,0.35);
+  position: relative;
+}
+
+.story-bar-fill {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  background: rgba(255,255,255,0.9);
+  border-radius: 1px;
+}
+
+.story-bar-empty {
+  background: rgba(255,255,255,0.25);
+}
+
+.story-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 8px;
+  position: relative;
+  z-index: 2;
+}
+
+.story-avatar-wrap {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 1.5px solid rgba(255,255,255,0.7);
+  flex-shrink: 0;
+}
+
+.story-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.story-header-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.story-username {
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.story-sponsored {
+  font-size: 9px;
+  color: rgba(255,255,255,0.6);
+}
+
+.story-header-icon {
+  font-size: 14px;
+  color: rgba(255,255,255,0.8);
+  cursor: pointer;
+}
+
+.story-media {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.story-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #222;
+}
+
+.story-caption {
+  position: absolute;
+  bottom: 70px;
+  left: 10px;
+  right: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.7);
+  z-index: 2;
+  line-height: 1.4;
+}
+
+.story-cta-bar {
+  padding: 8px 10px 10px;
+  display: flex;
+  justify-content: center;
+  position: relative;
+  z-index: 2;
+}
+
+.story-cta-btn {
+  padding: 7px 20px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  letter-spacing: 0.01em;
+}
+
+/* ─── Facebook Feed Simulator ────────────────────────────────── */
+
+.fb-screen {
+  background: #f0f2f5 !important;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.fb-top-bar {
+  background: #fff;
+  border-bottom: 1px solid #e4e6eb;
+  display: flex;
+  align-items: center;
+  padding: 22px 8px 4px;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.fb-logo {
+  font-size: 15px;
+  font-weight: 800;
+  color: #1877f2;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  line-height: 1;
+  flex: 1;
+}
+
+.fb-nav-icons {
+  display: flex;
+  gap: 4px;
+}
+
+.fb-nav-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #e4e6eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fb-tab-bar {
+  display: flex;
+  border-bottom: 1px solid #e4e6eb;
+  background: #fff;
+  flex-shrink: 0;
+}
+
+.fb-tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 2px 5px;
+  gap: 1px;
+  font-size: 8px;
+  color: #65676b;
+  border-bottom: 2px solid transparent;
+  position: relative;
+}
+
+.fb-tab-active {
+  color: #1877f2;
+  border-bottom: 2px solid #1877f2;
+}
+
+.fb-feed-scroll {
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.fb-feed-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.fb-post {
+  background: #fff;
+  margin-bottom: 8px;
+}
+
+.fb-ad-post {
+  border-top: 3px solid #e4e6ea;
+}
+
+.fb-post-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 4px;
+}
+
+.fb-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  overflow: hidden;
+}
+
+.fb-post-meta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.fb-post-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: #050505;
+}
+
+.fb-post-time {
+  font-size: 9px;
+  color: #65676b;
+}
+
+.fb-post-more {
+  font-size: 16px;
+  color: #65676b;
+  padding: 0 4px;
+}
+
+.fb-post-text {
+  font-size: 10px;
+  color: #050505;
+  padding: 4px 10px 6px;
+  line-height: 1.4;
+}
+
+.fb-post-image {
+  width: 100%;
+  display: block;
+}
+
+.fb-ad-media {
+  width: 100%;
+  overflow: hidden;
+  background: linear-gradient(135deg, #1f2734, #3b4558);
+}
+
+.fb-ad-media > img, .fb-ad-media > video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.fb-ad-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #1f2734, #3b4558);
+  min-height: 80px;
+}
+
+.fb-cta-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: #f0f2f5;
+  gap: 8px;
+}
+
+.fb-cta-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.fb-cta-domain {
+  font-size: 8px;
+  color: #65676b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.fb-cta-headline {
+  font-size: 10px;
+  font-weight: 700;
+  color: #050505;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fb-cta-btn {
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.fb-post-counts {
+  font-size: 9px;
+  color: #65676b;
+  padding: 4px 10px;
+  border-bottom: 1px solid #e4e6ea;
+}
+
+.fb-post-actions {
+  display: flex;
+  padding: 0 4px 2px;
+}
+
+.fb-action-btn {
+  flex: 1;
+  padding: 5px 0;
+  background: none;
+  border: none;
+  font-size: 10px;
+  font-weight: 600;
+  color: #65676b;
+  cursor: pointer;
+  text-align: center;
+}
+
+.fb-bottom-nav {
+  background: #fff;
+  border-top: 1px solid #e4e6ea;
+  display: flex;
+  justify-content: space-around;
+  padding: 4px 0 2px;
+  flex-shrink: 0;
+}
+
+.fb-bottom-btn {
+  background: none;
+  border: none;
+  padding: 4px 6px;
+  cursor: pointer;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  position: relative;
+}
+
+.fb-bottom-active svg {
+  color: #1877f2;
+}
+
+.fb-bottom-active::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 24px;
+  height: 2px;
+  background: #1877f2;
+  border-radius: 1px;
+}
+
+/* ─── TikTok Feed Simulator ──────────────────────────────────── */
+
+.tt-screen {
+  background: #000 !important;
+  position: relative;
+  overflow: hidden;
+}
+
+.tt-media {
+  position: absolute;
+  inset: 0;
+}
+
+.tt-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #111;
+}
+
+.tt-top-bar {
+  position: absolute;
+  top: 20px;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 4px 0 0;
+  z-index: 3;
+  overflow: hidden;
+}
+
+.tt-tabs-strip {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  overflow: hidden;
+  gap: 0;
+  padding-left: 6px;
+  justify-content: flex-end;
+}
+
+.tt-tab {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.55);
+  white-space: nowrap;
+  padding: 4px 7px;
+  flex-shrink: 0;
+}
+
+.tt-active {
+  color: #fff;
+  font-weight: 700;
+  border-bottom: 2px solid #fff;
+  padding-bottom: 2px;
+}
+
+.tt-live-badge {
+  font-size: 8.5px;
+  font-weight: 700;
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.7);
+  border-radius: 2px;
+  padding: 1px 3px;
+  margin-right: 2px;
+  flex-shrink: 0;
+}
+
+.tt-search-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  font-size: 14px;
+}
+
+.tt-sponsored-label {
+  position: absolute;
+  top: 54px;
+  left: 10px;
+  font-size: 9px;
+  color: rgba(255,255,255,0.7);
+  background: rgba(0,0,0,0.4);
+  padding: 2px 6px;
+  border-radius: 3px;
+  z-index: 3;
+}
+
+.tt-actions {
+  position: absolute;
+  right: 8px;
+  bottom: 100px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  z-index: 3;
+}
+
+.tt-action-avatar-wrap {
+  position: relative;
+  width: 32px;
+}
+
+.tt-action-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid #fff;
+}
+
+.tt-follow-plus {
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 14px;
+  height: 14px;
+  background: #fe2c55;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 900;
+  color: #fff;
+  line-height: 1;
+}
+
+.tt-action-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.tt-action-item span {
+  font-size: 9px;
+  color: #fff;
+  font-weight: 600;
+}
+
+.tt-record-disc {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #2d2d2d, #555);
+  border: 3px solid #2d2d2d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tt-record-inner {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #1a1a1a;
+}
+
+.tt-info {
+  position: absolute;
+  bottom: 76px;
+  left: 10px;
+  right: 50px;
+  z-index: 3;
+}
+
+.tt-handle {
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 4px;
+}
+
+.tt-caption {
+  font-size: 10px;
+  color: #fff;
+  line-height: 1.35;
+  margin-bottom: 6px;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+}
+
+.tt-audio-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9px;
+  color: rgba(255,255,255,0.8);
+}
+
+.tt-music-note {
+  font-size: 10px;
+}
+
+.tt-audio-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tt-cta-wrap {
+  position: absolute;
+  bottom: 50px;
+  left: 10px;
+  right: 50px;
+  z-index: 3;
+}
+
+.tt-cta-btn {
+  display: inline-block;
+  padding: 6px 14px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.tt-bottom-nav {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(0,0,0,0.85);
+  display: flex;
+  justify-content: space-around;
+  padding: 6px 0 4px;
+  z-index: 3;
+}
+
+.tt-nav-btn {
+  background: none;
+  border: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.tt-nav-btn span {
+  font-size: 8px;
+  color: rgba(255,255,255,0.6);
+}
+
+.tt-nav-active span {
+  color: #fff;
+}
+
+.tt-plus-btn {
+  width: 30px;
+  height: 22px;
+  background: #fe2c55;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ─── Instagram Reels Simulator ──────────────────────────────── */
+
+.reels-screen {
+  background: #000 !important;
+  position: relative;
+  overflow: hidden;
+}
+
+.reels-media {
+  position: absolute;
+  inset: 0;
+  background: #111;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.reels-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(160deg, #1a1a1a 0%, #2a2a2a 100%);
+}
+
+.reels-top-bar {
+  position: absolute;
+  top: 20px;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  z-index: 5;
+}
+
+.reels-title {
+  color: white;
+  font-size: 15px;
+  font-weight: 700;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  letter-spacing: -0.2px;
+}
+
+.reels-sponsored-label {
+  position: absolute;
+  top: 50px;
+  left: 10px;
+  font-size: 9px;
+  color: rgba(255,255,255,0.85);
+  font-weight: 600;
+  background: rgba(0,0,0,0.45);
+  padding: 2px 6px;
+  border-radius: 3px;
+  z-index: 5;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.reels-actions {
+  position: absolute;
+  right: 6px;
+  bottom: 34px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  z-index: 5;
+}
+
+.reels-action-avatar-sm {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 1.5px solid transparent;
+  background: linear-gradient(#fff, #fff) padding-box,
+    linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888) border-box;
+}
+
+.reels-action-avatar-wrap {
+  margin-bottom: 2px;
+}
+
+.reels-action-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid white;
+  overflow: hidden;
+}
+
+.reels-action-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.reels-action-item span {
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.reels-action-ellipsis {
+  margin-top: -4px;
+}
+
+.reels-info {
+  position: absolute;
+  left: 8px;
+  bottom: 90px;
+  right: 52px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.reels-info-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.reels-info-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 1.5px solid transparent;
+  background: linear-gradient(#fff, #fff) padding-box,
+    linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888) border-box;
+  flex-shrink: 0;
+}
+
+.reels-follow-btn {
+  background: rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.4);
+  border-radius: 10px;
+  color: #fff;
+  font-size: 8.5px;
+  font-weight: 600;
+  padding: 2px 7px;
+  cursor: default;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  flex-shrink: 0;
+}
+
+.reels-ad-label {
+  color: rgba(255,255,255,0.55);
+  font-size: 8.5px;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.reels-handle {
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.reels-sponsored-text {
+  color: rgba(255,255,255,0.75);
+  font-size: 9px;
+  font-weight: 500;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.reels-caption {
+  color: rgba(255,255,255,0.9);
+  font-size: 10px;
+  line-height: 1.35;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  max-height: 32px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.reels-audio-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.reels-music-note {
+  color: white;
+  font-size: 10px;
+}
+
+.reels-audio-text {
+  color: rgba(255,255,255,0.8);
+  font-size: 9px;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.reels-cta-wrap {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 34px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  background: rgba(0,0,0,0.5);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.reels-cta-btn {
+  flex: 1;
+  text-align: center;
+  padding: 7px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  cursor: default;
+  border-radius: 6px 0 0 6px;
+}
+
+.reels-cta-chevron {
+  padding: 7px 8px;
+  color: rgba(255,255,255,0.7);
+  font-size: 12px;
+  background: rgba(0,0,0,0.3);
+}
+
+.reels-bottom-nav {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 30px;
+  background: rgba(0,0,0,0.85);
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  z-index: 5;
+  padding-bottom: 2px;
+}
+
+.reels-nav-btn {
+  background: none;
+  border: none;
+  padding: 0 4px;
+  cursor: default;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.6;
+}
+
+.reels-nav-active {
+  opacity: 1;
 }
 
 /* ─── Responsive ─────────────────────────────────────────────── */
