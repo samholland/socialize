@@ -63,10 +63,10 @@ export function ReelsFeedScroll({
           )}
         </div>
 
-        {/* ── Top bar: + | Reels  Friends [avatars] | ♡≡ ── */}
+        {/* ── Top bar: + | Reels  Friends [avatars] ── */}
         <div className="reels-top-bar">
           {/* Plus */}
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round">
             <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
           </svg>
 
@@ -81,35 +81,31 @@ export function ReelsFeedScroll({
             </div>
           </div>
 
-          {/* Favorites / filter icon (heart with lines) */}
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
-            <line x1="4" y1="19" x2="9" y2="19"/>
-            <line x1="4" y1="15" x2="7" y2="15"/>
-          </svg>
+          {/* Spacer to balance the layout */}
+          <div style={{ width: 16 }} />
         </div>
 
         {/* ── Right action column ── */}
         <div className="reels-actions">
           {/* Heart */}
           <div className="reels-action-item">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
               <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
             </svg>
             <span>29.9K</span>
           </div>
 
-          {/* Comment — speech bubble */}
+          {/* Comment — IG-style circle bubble with bottom-left tail */}
           <div className="reels-action-item">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2C6.48 2 2 6.48 2 12c0 1.54.36 3 .99 4.28L2 22l5.72-.99A9.94 9.94 0 0 0 12 22c5.52 0 10-4.48 10-10S17.52 2 12 2z"/>
             </svg>
             <span>65</span>
           </div>
 
           {/* Repost / share — two arrows */}
           <div className="reels-action-item">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="1 4 1 10 7 10"/>
               <polyline points="23 20 23 14 17 14"/>
               <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
@@ -119,7 +115,7 @@ export function ReelsFeedScroll({
 
           {/* Send / DM — paper plane */}
           <div className="reels-action-item">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
               <line x1="22" y1="2" x2="11" y2="13"/>
               <polygon points="22 2 15 22 11 13 2 9 22 2"/>
             </svg>
@@ -127,8 +123,8 @@ export function ReelsFeedScroll({
           </div>
 
           {/* Ellipsis */}
-          <div className="reels-action-item" style={{ marginTop: 2 }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+          <div className="reels-action-item">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
               <circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/>
             </svg>
           </div>
