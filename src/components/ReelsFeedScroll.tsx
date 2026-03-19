@@ -10,7 +10,7 @@ export type ReelsFeedScrollProps = {
   clientName: string;
   clientAvatarUrl?: string;
   media: PreviewMedia;
-  interactive?: boolean;
+
 };
 
 export function ReelsFeedScroll({
@@ -21,7 +21,7 @@ export function ReelsFeedScroll({
   clientName,
   clientAvatarUrl,
   media,
-  interactive = true,
+
 }: ReelsFeedScrollProps) {
   const WRAPPER_W = 300;
   const WRAPPER_H = Math.round(300 * (2969 / 1842)); // ≈ 484
@@ -55,7 +55,7 @@ export function ReelsFeedScroll({
       {/* Screen */}
       <div
         className="feed-screen reels-screen"
-        style={interactive ? undefined : { pointerEvents: "none" }}
+
       >
         {/* Full-bleed media background */}
         <div className="reels-media">

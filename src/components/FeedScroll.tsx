@@ -13,7 +13,7 @@ export type FeedScrollProps = {
   clientName: string;
   clientAvatarUrl?: string;
   media: PreviewMedia;
-  interactive?: boolean;
+
 };
 
 // Fake posts for the feed background
@@ -129,14 +129,14 @@ export function FeedScroll({
   clientName,
   clientAvatarUrl,
   media,
-  interactive = true,
+
 }: FeedScrollProps) {
   const screenRef = useRef<HTMLDivElement>(null);
   const adRef = useRef<HTMLDivElement>(null);
 
   const isStory = platform === "Instagram Story" || platform === "TikTok";
 
-  // Scroll so the ad is centered — also fires when interactive turns off
+  // Scroll so the ad is visible on mount / media change
   useEffect(() => {
     const screen = screenRef.current;
     const ad = adRef.current;
@@ -147,7 +147,7 @@ export function FeedScroll({
       screen.scrollTop = Math.max(0, adTop - screenH * 0.2);
     }, 80);
     return () => clearTimeout(id);
-  }, [platform, mediaAspect, media, interactive]);
+  }, [platform, mediaAspect, media]);
 
   const adAspect = isStory ? "9/16" : mediaAspect === "3:4" ? "3/4" : "1/1";
 
@@ -174,7 +174,6 @@ export function FeedScroll({
       <div
         className="feed-screen"
         ref={screenRef}
-        style={interactive ? undefined : { overflow: "hidden", pointerEvents: "none" }}
       >
         {/* IG top bar */}
         <div className="feed-top-bar">

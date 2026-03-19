@@ -668,7 +668,6 @@ export default function Home() {
   const [pendingUndo, setPendingUndo] = useState<PendingUndo | null>(null);
 
   // Preview
-  const [interactive, setInteractive] = useState(true);
   const [zoom, setZoom] = useState(1);
 
   // Sidebar search
@@ -2364,17 +2363,6 @@ export default function Home() {
       <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
         {/* Toolbar */}
         <div className="preview-toolbar">
-          <label className="interactive-toggle">
-            <input
-              type="checkbox"
-              checked={interactive}
-              onChange={(e) => setInteractive(e.target.checked)}
-            />
-            <span className="interactive-track">
-              <span className="interactive-thumb" />
-            </span>
-            <span className="interactive-label">Interactive</span>
-          </label>
           <div className="zoom-controls">
             <button
               className="zoom-btn"
@@ -2410,7 +2398,7 @@ export default function Home() {
                 clientName={client.name}
                 clientAvatarUrl={client.profileImageDataUrl}
                 media={selectedMedia}
-                interactive={interactive}
+
               />
             )}
             {campaign.platform === "Instagram Story" && (
@@ -2422,7 +2410,7 @@ export default function Home() {
                 clientName={client.name}
                 clientAvatarUrl={client.profileImageDataUrl}
                 media={selectedMedia}
-                interactive={interactive}
+
               />
             )}
             {campaign.platform === "Facebook Feed" && (
@@ -2435,7 +2423,7 @@ export default function Home() {
                 clientName={client.name}
                 clientAvatarUrl={client.profileImageDataUrl}
                 media={selectedMedia}
-                interactive={interactive}
+
               />
             )}
             {campaign.platform === "TikTok" && (
@@ -2447,7 +2435,7 @@ export default function Home() {
                 clientName={client.name}
                 clientAvatarUrl={client.profileImageDataUrl}
                 media={selectedMedia}
-                interactive={interactive}
+
               />
             )}
             {campaign.platform === "Instagram Reels" && (
@@ -2459,7 +2447,7 @@ export default function Home() {
                 clientName={client.name}
                 clientAvatarUrl={client.profileImageDataUrl}
                 media={selectedMedia}
-                interactive={interactive}
+
               />
             )}
           </div>

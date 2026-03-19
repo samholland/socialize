@@ -12,7 +12,7 @@ export type FacebookFeedScrollProps = {
   clientName: string;
   clientAvatarUrl?: string;
   media: PreviewMedia;
-  interactive?: boolean;
+
 };
 
 const FAKE_FB_POSTS = [
@@ -82,7 +82,7 @@ export function FacebookFeedScroll({
   clientName,
   clientAvatarUrl,
   media,
-  interactive = true,
+
 }: FacebookFeedScrollProps) {
   const WRAPPER_W = 300;
   const WRAPPER_H = Math.round(300 * (2969 / 1842)); // ≈ 484
@@ -90,7 +90,7 @@ export function FacebookFeedScroll({
   const screenRef = useRef<HTMLDivElement>(null);
   const adRef = useRef<HTMLDivElement>(null);
 
-  // Scroll to the ad post — re-fires when interactive turns off
+  // Scroll to the ad post on mount / media change
   useEffect(() => {
     const screen = screenRef.current;
     const ad = adRef.current;
@@ -101,7 +101,7 @@ export function FacebookFeedScroll({
       screen.scrollTop = Math.max(0, adTop - screenH * 0.15);
     }, 80);
     return () => clearTimeout(id);
-  }, [media, mediaAspect, interactive]);
+  }, [media, mediaAspect]);
 
   const hasMedia = media.kind === "image" || media.kind === "video";
   const adAspect = mediaAspect === "3:4" ? "3/4" : "1/1";
@@ -124,7 +124,7 @@ export function FacebookFeedScroll({
       <div
         className="feed-screen fb-screen"
         ref={screenRef}
-        style={interactive ? undefined : { overflow: "hidden", pointerEvents: "none" }}
+
       >
         {/* Facebook top bar — white bg, blue "facebook" wordmark, SVG icons */}
         <div className="fb-top-bar">
