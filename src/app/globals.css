@@ -1661,7 +1661,7 @@ html, body {
 .story-header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   padding: 4px 10px 8px;
   position: relative;
   z-index: 4;
@@ -1669,8 +1669,8 @@ html, body {
 }
 
 .story-avatar-wrap {
-  width: 28px;
-  height: 28px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   overflow: hidden;
   border: 0.5px solid rgba(255,255,255,0.7);
@@ -1770,11 +1770,11 @@ html, body {
 .story-footer-label {
   position: absolute;
   left: 12px;
-  bottom: 18px;
+  bottom: 24px;
   z-index: 4;
   pointer-events: none;
   color: #fff;
-  font-size: 12px;
+  font-size: 9.5px;
   font-weight: 500;
 }
 
