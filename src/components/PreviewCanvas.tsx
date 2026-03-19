@@ -150,7 +150,7 @@ function normalizeHexColor(value: string | undefined, fallback: string): string 
 
 function isStoryLikePlatform(platform: string): boolean {
   const key = platform.toLowerCase();
-  return key.includes("story") || key.includes("tiktok");
+  return key.includes("story") || key.includes("reels") || key.includes("tiktok");
 }
 
 export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function PreviewCanvas({
@@ -167,6 +167,7 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
 }: Props, ref) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [isDragging, setIsDragging] = useState(false);
   const [frameVersion, setFrameVersion] = useState(0);
@@ -331,41 +332,257 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
   function drawStoryHeader(
     ctx: CanvasRenderingContext2D,
     safeClientName: string,
-    avatarImage: HTMLImageElement | null
+    avatarImage: HTMLImageElement | null,
+    platformName: string
   ) {
     const s = layout.scale;
+    const plt = platformName.toLowerCase();
+    const isTikTok = plt.includes("tiktok");
+    const isReels = plt.includes("reels");
 
-    ctx.fillStyle = "rgba(255,255,255,0.45)";
-    fillRoundedRect(
-      ctx,
-      {
-        x: layout.screen.x + 14 * s,
-        y: layout.screen.y + 16 * s,
-        w: layout.screen.w - 28 * s,
-        h: 3 * s,
-      },
-      2 * s
-    );
+    if (isTikTok) {
+      // Black background fill
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(layout.screen.x, layout.screen.y, layout.screen.w, layout.screen.h);
 
-    drawAvatar(
-      ctx,
-      layout.screen.x + 32 * s,
-      layout.screen.y + 80 * s,
-      18 * s,
-      avatarImage
-    );
+      // Top bar overlay
+      ctx.fillStyle = "rgba(0,0,0,0.45)";
+      ctx.fillRect(layout.screen.x, layout.screen.y, layout.screen.w, 46 * s);
 
+      // Tab strip: dim tabs + "For You" active
+      ctx.fillStyle = "rgba(255,255,255,0.45)";
+      ctx.font = `500 ${11 * s}px ${FONT_STACK}`;
+      ctx.textAlign = "center";
+      const tabs = ["Following", "Shop", "For You"];
+      const tabXs = [0.22, 0.44, 0.66];
+      tabs.forEach((tab, i) => {
+        if (tab === "For You") {
+          ctx.fillStyle = "#ffffff";
+          ctx.font = `700 ${11 * s}px ${FONT_STACK}`;
+        } else {
+          ctx.fillStyle = "rgba(255,255,255,0.45)";
+          ctx.font = `500 ${11 * s}px ${FONT_STACK}`;
+        }
+        ctx.fillText(tab, layout.screen.x + layout.screen.w * tabXs[i], layout.screen.y + 32 * s);
+      });
+
+      // "For You" underline
+      ctx.font = `700 ${11 * s}px ${FONT_STACK}`;
+      const fyW = ctx.measureText("For You").width;
+      const fyX = layout.screen.x + layout.screen.w * 0.66 - fyW / 2;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(fyX, layout.screen.y + 36 * s, fyW, 2 * s);
+      ctx.textAlign = "left";
+
+      // Right action column silhouettes (4 circles)
+      const ttColX = layout.screen.x + layout.screen.w - 22 * s;
+      const ttColStartY = layout.screen.y + layout.screen.h * 0.42;
+      for (let i = 0; i < 4; i++) {
+        ctx.fillStyle = i === 0 ? "#fe2c55" : "rgba(255,255,255,0.85)";
+        ctx.beginPath();
+        ctx.arc(ttColX, ttColStartY + i * 36 * s, 10 * s, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Bottom-left handle
+      ctx.fillStyle = "#ffffff";
+      ctx.font = `700 ${13 * s}px ${FONT_STACK}`;
+      ctx.fillText(
+        "@" + safeClientName.toLowerCase().replace(/\s/g, ""),
+        layout.screen.x + 14 * s,
+        layout.screen.y + layout.screen.h - 52 * s
+      );
+
+      // TikTok dark bottom nav bar
+      ctx.fillStyle = "rgba(0,0,0,0.88)";
+      ctx.fillRect(layout.screen.x, layout.screen.y + layout.screen.h - 36 * s, layout.screen.w, 36 * s);
+      const ttNavStep = layout.screen.w / 5;
+      for (let i = 0; i < 5; i++) {
+        const cx = layout.screen.x + ttNavStep * (i + 0.5);
+        const cy = layout.screen.y + layout.screen.h - 18 * s;
+        if (i === 2) {
+          // Plus button (white rectangle with rounded corners)
+          ctx.fillStyle = "rgba(255,255,255,0.9)";
+          roundedRectPath(ctx, cx - 14 * s, cy - 9 * s, 28 * s, 18 * s, 4 * s);
+          ctx.fill();
+        } else {
+          ctx.fillStyle = i === 0 ? "#ffffff" : "rgba(255,255,255,0.5)";
+          ctx.beginPath();
+          ctx.arc(cx, cy, 7 * s, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+    } else if (isReels) {
+      // Black background
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(layout.screen.x, layout.screen.y, layout.screen.w, layout.screen.h);
+
+      // Top bar overlay
+      ctx.fillStyle = "rgba(0,0,0,0.3)";
+      ctx.fillRect(layout.screen.x, layout.screen.y, layout.screen.w, 46 * s);
+
+      // "Reels ▾" centered at top
+      ctx.fillStyle = "#ffffff";
+      ctx.font = `700 ${16 * s}px ${FONT_STACK}`;
+      ctx.textAlign = "center";
+      ctx.fillText("Reels \u25be", layout.screen.x + layout.screen.w / 2, layout.screen.y + 32 * s);
+      ctx.textAlign = "left";
+
+      // Right action column (heart, comment, share + avatar at bottom)
+      const rlColX = layout.screen.x + layout.screen.w - 22 * s;
+      const rlColStartY = layout.screen.y + layout.screen.h * 0.45;
+      for (let i = 0; i < 3; i++) {
+        ctx.fillStyle = "rgba(255,255,255,0.85)";
+        ctx.beginPath();
+        ctx.arc(rlColX, rlColStartY + i * 32 * s, 9 * s, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Avatar at bottom of action col
+      drawAvatar(ctx, rlColX, rlColStartY + 3 * 32 * s, 10 * s, avatarImage);
+
+      // Bottom-left: @handle
+      ctx.fillStyle = "#ffffff";
+      ctx.font = `700 ${13 * s}px ${FONT_STACK}`;
+      ctx.fillText(
+        "@" + safeClientName.toLowerCase().replace(/\s/g, ""),
+        layout.screen.x + 14 * s,
+        layout.screen.y + layout.screen.h - 58 * s
+      );
+
+      // IG-style bottom nav (dark, 5 icon dots, Reels=index 1 active)
+      ctx.fillStyle = "rgba(0,0,0,0.88)";
+      ctx.fillRect(layout.screen.x, layout.screen.y + layout.screen.h - 32 * s, layout.screen.w, 32 * s);
+      const rlNavStep = layout.screen.w / 5;
+      for (let i = 0; i < 5; i++) {
+        const cx = layout.screen.x + rlNavStep * (i + 0.5);
+        ctx.fillStyle = i === 1 ? "#ffffff" : "rgba(255,255,255,0.5)";
+        ctx.beginPath();
+        ctx.arc(cx, layout.screen.y + layout.screen.h - 16 * s, 6 * s, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+    } else {
+      // IG Story: progress bar + avatar
+      ctx.fillStyle = "rgba(255,255,255,0.45)";
+      fillRoundedRect(
+        ctx,
+        {
+          x: layout.screen.x + 14 * s,
+          y: layout.screen.y + 16 * s,
+          w: layout.screen.w - 28 * s,
+          h: 3 * s,
+        },
+        2 * s
+      );
+
+      drawAvatar(ctx, layout.screen.x + 32 * s, layout.screen.y + 80 * s, 18 * s, avatarImage);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = `700 ${15 * s}px ${FONT_STACK}`;
+      ctx.fillText(fitText(safeClientName, 18), layout.screen.x + 60 * s, layout.screen.y + 76 * s);
+
+      ctx.fillStyle = "rgba(255,255,255,0.78)";
+      ctx.font = `500 ${11 * s}px ${FONT_STACK}`;
+      ctx.fillText("Sponsored", layout.screen.x + 60 * s, layout.screen.y + 92 * s);
+
+      ctx.fillStyle = "rgba(255,255,255,0.96)";
+      ctx.font = `700 ${20 * s}px ${FONT_STACK}`;
+      ctx.fillText("x", layout.screen.x + layout.screen.w - 24 * s, layout.screen.y + 43 * s);
+    }
+  }
+
+  function drawFBHeader(ctx: CanvasRenderingContext2D) {
+    const s = layout.scale;
+    // White status bar area
     ctx.fillStyle = "#ffffff";
-    ctx.font = `700 ${15 * s}px ${FONT_STACK}`;
-    ctx.fillText(fitText(safeClientName, 18), layout.screen.x + 60 * s, layout.screen.y + 76 * s);
+    ctx.fillRect(layout.screen.x, layout.screen.y, layout.screen.w, 14 * s);
+    // Status bar time (dark text on white)
+    ctx.fillStyle = "#1c1e21";
+    ctx.font = `600 ${10 * s}px ${FONT_STACK}`;
+    ctx.fillText("12:13", layout.screen.x + 16 * s, layout.screen.y + 12 * s);
+    // White top bar
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(layout.screen.x, layout.screen.y + 14 * s, layout.screen.w, 34 * s);
+    // Bottom border of top bar
+    ctx.fillStyle = "#e4e6eb";
+    ctx.fillRect(layout.screen.x, layout.screen.y + 48 * s, layout.screen.w, s);
+    // "facebook" wordmark in blue
+    ctx.fillStyle = "#1877f2";
+    ctx.font = `800 ${16 * s}px ${FONT_STACK}`;
+    ctx.fillText("facebook", layout.screen.x + 28 * s, layout.screen.y + 38 * s);
+    // Hamburger icon hint (3 lines) on left
+    ctx.fillStyle = "#65676b";
+    for (let i = 0; i < 3; i++) {
+      ctx.fillRect(layout.screen.x + 10 * s, layout.screen.y + 20 * s + i * 5 * s, 10 * s, 1.5 * s);
+    }
+  }
 
-    ctx.fillStyle = "rgba(255,255,255,0.78)";
-    ctx.font = `500 ${11 * s}px ${FONT_STACK}`;
-    ctx.fillText("Sponsored", layout.screen.x + 60 * s, layout.screen.y + 92 * s);
-
-    ctx.fillStyle = "rgba(255,255,255,0.96)";
-    ctx.font = `700 ${20 * s}px ${FONT_STACK}`;
-    ctx.fillText("x", layout.screen.x + layout.screen.w - 24 * s, layout.screen.y + 43 * s);
+  function drawFBBottomNav(ctx: CanvasRenderingContext2D) {
+    const s = layout.scale;
+    const navH = 44 * s;
+    const navY = layout.screen.y + layout.screen.h - navH;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(layout.screen.x, navY, layout.screen.w, navH);
+    // Divider
+    ctx.fillStyle = "#e4e6eb";
+    ctx.fillRect(layout.screen.x, navY, layout.screen.w, s);
+    // 5 nav icons as geometric shapes (no emoji)
+    const step = layout.screen.w / 5;
+    for (let i = 0; i < 5; i++) {
+      const cx = layout.screen.x + step * (i + 0.5);
+      const cy = navY + navH * 0.45;
+      const iconColor = i === 0 ? "#1877f2" : "#65676b";
+      ctx.fillStyle = iconColor;
+      ctx.strokeStyle = iconColor;
+      ctx.lineWidth = Math.max(1, 1.5 * s);
+      if (i === 0) {
+        // Home: triangle roof + rect body
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - 7 * s);
+        ctx.lineTo(cx - 7 * s, cy - 1 * s);
+        ctx.lineTo(cx + 7 * s, cy - 1 * s);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillRect(cx - 4.5 * s, cy - 1 * s, 9 * s, 7 * s);
+        // Blue underline for active
+        ctx.fillStyle = "#1877f2";
+        ctx.fillRect(cx - 12 * s, navY, 24 * s, 2.5 * s);
+      } else if (i === 1) {
+        // Reels: rounded rect with play triangle inside
+        roundedRectPath(ctx, cx - 7 * s, cy - 6 * s, 14 * s, 12 * s, 2 * s);
+        ctx.strokeStyle = iconColor;
+        ctx.lineWidth = 1.5 * s;
+        ctx.stroke();
+        ctx.fillStyle = iconColor;
+        ctx.beginPath();
+        ctx.moveTo(cx - 2 * s, cy - 3 * s);
+        ctx.lineTo(cx + 4 * s, cy);
+        ctx.lineTo(cx - 2 * s, cy + 3 * s);
+        ctx.closePath();
+        ctx.fill();
+      } else if (i === 2) {
+        // Friends: two circles stacked
+        ctx.beginPath();
+        ctx.arc(cx - 3 * s, cy - 2 * s, 4 * s, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(cx + 3 * s, cy - 2 * s, 3 * s, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillRect(cx - 9 * s, cy + 2 * s, 10 * s, 4 * s);
+        ctx.fillRect(cx - 1 * s, cy + 2 * s, 9 * s, 4 * s);
+      } else if (i === 3) {
+        // Bell: rounded rect top + handle
+        roundedRectPath(ctx, cx - 5 * s, cy - 7 * s, 10 * s, 9 * s, 3 * s);
+        ctx.fill();
+        ctx.fillRect(cx - 2 * s, cy + 2 * s, 4 * s, 3 * s);
+      } else {
+        // Menu: 3 horizontal lines
+        for (let j = 0; j < 3; j++) {
+          ctx.fillRect(cx - 7 * s, cy - 5 * s + j * 5 * s, 14 * s, 2 * s);
+        }
+      }
+    }
   }
 
   function drawMediaPlaceholder(ctx: CanvasRenderingContext2D, rect: Rect) {
@@ -592,7 +809,7 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
       drawMediaPlaceholder(ctx, mediaRect);
       await drawPlacedMedia(ctx, mediaRect);
 
-      drawStoryHeader(ctx, safeClientName, avatarImage);
+      drawStoryHeader(ctx, safeClientName, avatarImage, platform);
 
       ctx.fillStyle = "rgba(255,255,255,0.18)";
       fillRoundedRect(
@@ -632,13 +849,23 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
         resolvedCtaTextColor
       );
     } else {
+      const isFacebook = platform.toLowerCase().includes("facebook");
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(layout.screen.x, layout.screen.y, layout.screen.w, layout.screen.h);
-      drawFeedHeader(ctx, safeClientName, avatarImage);
 
+      if (isFacebook) {
+        // Facebook: light gray feed bg, white top bar via drawFBHeader
+        ctx.fillStyle = "#f0f2f5";
+        ctx.fillRect(layout.screen.x, layout.screen.y, layout.screen.w, layout.screen.h);
+        drawFBHeader(ctx);
+      } else {
+        drawFeedHeader(ctx, safeClientName, avatarImage);
+      }
+
+      const headerH = isFacebook ? 80 * layout.scale : 96 * layout.scale;
       const mediaRect: Rect = {
         x: layout.screen.x,
-        y: layout.screen.y + 96 * layout.scale,
+        y: layout.screen.y + headerH,
         w: layout.screen.w,
         h: layout.screen.w / aspectToRatio(resolvedAspect),
       };
@@ -661,7 +888,11 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
 
       const actionsY = mediaRect.y + mediaRect.h + 72 * layout.scale;
       await drawFeedMeta(ctx, safeClientName, actionsY);
-      await drawFeedBottomNav(ctx);
+      if (isFacebook) {
+        drawFBBottomNav(ctx);
+      } else {
+        await drawFeedBottomNav(ctx);
+      }
     }
 
     ctx.restore();
@@ -829,82 +1060,64 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     setTimeout(() => URL.revokeObjectURL(url), 250);
   }
 
+  function handleCanvasClick() {
+    fileInputRef.current?.click();
+  }
+
   return (
     <div
       onDrop={onDrop}
       onDragOver={onDragOver}
       onDragEnter={onDragEnter}
       onDragLeave={onDragLeave}
-      style={{ display: "grid", gap: 10 }}
+      style={{ position: "relative", display: "inline-block", width: 300 }}
     >
+      {/* Hidden file input triggered by clicking placeholder area */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*,video/*"
+        onChange={onPickFile}
+        style={{ display: "none" }}
+      />
+
+      {/* Canvas — click opens file picker when no media */}
       <canvas
         ref={canvasRef}
+        onClick={media.kind === "none" ? handleCanvasClick : undefined}
         style={{
-          width: "100%",
-          maxWidth: 540,
-          border: "1px solid #ddd",
-          borderRadius: 0,
+          width: 300,
           display: "block",
+          cursor: media.kind === "none" ? "pointer" : "default",
+          borderRadius: 0,
         }}
       />
-      <label
-        style={{
-          display: "inline-flex",
-          gap: 10,
-          alignItems: "center",
-          fontSize: 14,
-          color: "#444",
-          cursor: "pointer",
-          userSelect: "none",
-        }}
-      >
-        <input
-          type="file"
-          accept="image/*,video/*"
-          onChange={onPickFile}
-          style={{ display: "none" }}
-        />
-        <span style={{ padding: "6px 10px", border: "1px solid #ddd", borderRadius: 8 }}>
-          Choose file
-        </span>
-        <span>...or drag &amp; drop onto the preview</span>
-      </label>
 
-      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-        <button
-          onClick={exportPNG}
+      {/* Upload hint overlay — shown when no media and dragging, or as subtle hint */}
+      {isDragging && (
+        <div
           style={{
-            padding: "8px 12px",
-            border: "1px solid #ddd",
-            borderRadius: 10,
-            background: "#fff",
-            cursor: "pointer",
-            fontWeight: 600,
-            fontFamily:
-              'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(0,122,255,0.12)",
+            border: "2px dashed #007aff",
+            borderRadius: 8,
+            pointerEvents: "none",
+            gap: 8,
           }}
         >
-          Export PNG
-        </button>
-
-        <span style={{ fontSize: 13, color: "#666" }}>
-          Exports exactly what you see in the preview.
-        </span>
-      </div>
-
-      {media.kind === "video" && (
-        <video
-          ref={videoRef}
-          src={media.url}
-          controls
-          playsInline
-          style={{ width: "100%", maxWidth: 460, borderRadius: 10, border: "1px solid #ddd" }}
-        />
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#007aff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="17 8 12 3 7 8" />
+            <line x1="12" y1="3" x2="12" y2="15" />
+          </svg>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#007aff" }}>Drop to upload</span>
+        </div>
       )}
-
-      
-
-      
     </div>
   );
 });

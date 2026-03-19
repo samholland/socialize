@@ -14,22 +14,29 @@ import {
   type PreviewCanvasHandle,
 } from "@/components/PreviewCanvas";
 import { FeedScroll } from "@/components/FeedScroll";
+import { StoryFeedScroll } from "@/components/StoryFeedScroll";
+import { FacebookFeedScroll } from "@/components/FacebookFeedScroll";
+import { TikTokFeedScroll } from "@/components/TikTokFeedScroll";
+import { ReelsFeedScroll } from "@/components/ReelsFeedScroll";
 
 // ─── Types ───────────────────────────────────────────────────────
 
 type Platform =
   | "Instagram Feed"
   | "Instagram Story"
+  | "Instagram Reels"
   | "Facebook Feed"
-  | "LinkedIn Feed"
   | "TikTok";
+
+type WorkspaceKind = "local"; // future: "collaborative" | "personal"
+type Workspace = { id: string; name: string; kind: WorkspaceKind };
 
 type CtaOption = "Learn More" | "Shop Now" | "Sign Up" | "Download";
 type MediaAspect = "1:1" | "3:4" | "9:16";
 type CampaignObjective = "Awareness" | "Consideration" | "Conversion";
 type CampaignStatus = "draft" | "ready";
 type SelectionLevel = "client" | "project" | "campaign";
-type EditorMode = "campaign" | "campaign-settings";
+// EditorMode kept minimal — Campaign tab removed, only Ad editor remains
 
 type Campaign = {
   id: string;
@@ -92,14 +99,17 @@ type PendingUndo = {
 
 // ─── Constants ───────────────────────────────────────────────────
 
-const STORAGE_KEY = "socialize.v1.workspace";
+const LEGACY_STORAGE_KEY = "socialize.v1.workspace"; // for migration only
 const UI_KEY = "socialize.v1.ui";
+const WORKSPACES_KEY = "socialize.workspaces";
+const ACTIVE_WS_KEY = "socialize.activeWs";
+const WS_DATA_PREFIX = "socialize.ws.";
 
 const PLATFORM_OPTIONS: Platform[] = [
   "Instagram Feed",
   "Instagram Story",
+  "Instagram Reels",
   "Facebook Feed",
-  "LinkedIn Feed",
   "TikTok",
 ];
 const CTA_OPTIONS: CtaOption[] = [
@@ -131,7 +141,7 @@ function nowIso(): string {
 }
 
 function isStoryPlatform(p: Platform): boolean {
-  return p === "Instagram Story" || p === "TikTok";
+  return p === "Instagram Story" || p === "Instagram Reels" || p === "TikTok";
 }
 
 function normalizeAspect(
@@ -293,13 +303,49 @@ function defaultSelection(data: AppData): Selection {
   };
 }
 
-function loadWorkspace(): { data: AppData; selection: Selection; level: SelectionLevel } {
+function loadWorkspaceList(): Workspace[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(WORKSPACES_KEY);
+    if (raw) {
+      const list = JSON.parse(raw) as Workspace[];
+      if (Array.isArray(list) && list.length > 0) return list;
+    }
+    // Migration: check legacy key
+    const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (legacy) {
+      const defaultWs: Workspace = { id: "ws_default", name: "My Workspace", kind: "local" };
+      const parsed = JSON.parse(legacy) as { data?: AppData; selection?: Selection; level?: SelectionLevel };
+      if (parsed?.data?.clients) {
+        // Migrate data to new key
+        localStorage.setItem(WS_DATA_PREFIX + defaultWs.id, legacy);
+        localStorage.setItem(WORKSPACES_KEY, JSON.stringify([defaultWs]));
+        localStorage.setItem(ACTIVE_WS_KEY, defaultWs.id);
+        return [defaultWs];
+      }
+    }
+    const defaultWs: Workspace = { id: "ws_default", name: "My Workspace", kind: "local" };
+    localStorage.setItem(WORKSPACES_KEY, JSON.stringify([defaultWs]));
+    return [defaultWs];
+  } catch {
+    return [{ id: "ws_default", name: "My Workspace", kind: "local" }];
+  }
+}
+
+function loadActiveWsId(workspaces: Workspace[]): string {
+  if (typeof window === "undefined") return workspaces[0]?.id ?? "ws_default";
+  const stored = localStorage.getItem(ACTIVE_WS_KEY);
+  if (stored && workspaces.find((w) => w.id === stored)) return stored;
+  return workspaces[0]?.id ?? "ws_default";
+}
+
+function loadWorkspaceData(wsId: string): { data: AppData; selection: Selection; level: SelectionLevel } {
   if (typeof window === "undefined") {
     const data = emptyWorkspace();
     return { data, selection: defaultSelection(data), level: "campaign" };
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(WS_DATA_PREFIX + wsId);
     if (!raw) {
       const data = emptyWorkspace();
       return { data, selection: defaultSelection(data), level: "campaign" };
@@ -435,6 +481,34 @@ function IconChevron({ open }: { open: boolean }) {
   );
 }
 
+function IconChevronDown() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+      <path d="M2 3l3 4 3-4H2z" />
+    </svg>
+  );
+}
+
+function IconWorkspace() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+      <line x1="8" y1="21" x2="16" y2="21" />
+      <line x1="12" y1="17" x2="12" y2="21" />
+    </svg>
+  );
+}
+
+function IconUpload() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
+  );
+}
+
 function IconDuplicate() {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -551,20 +625,41 @@ function ResizeHandle({ onDrag }: { onDrag: (dx: number) => void }) {
 
 // ─── Main Component ───────────────────────────────────────────────
 
-export default function Home() {
-  const initialWorkspace = useMemo(() => loadWorkspace(), []);
-  const initialUi = useMemo(() => loadUiPrefs(), []);
+const DEFAULT_WS: Workspace = { id: "ws_default", name: "My Workspace", kind: "local" };
+const DEFAULT_EMPTY_DATA = emptyWorkspace();
+const DEFAULT_SELECTION: Selection = { clientId: "", projectId: "", campaignId: "" };
 
-  const [data, setData] = useState<AppData>(initialWorkspace.data);
-  const [selection, setSelection] = useState<Selection>(initialWorkspace.selection);
-  const [selectionLevel, setSelectionLevel] = useState<SelectionLevel>(initialWorkspace.level);
-  const [editorMode, setEditorMode] = useState<EditorMode>("campaign");
+export default function Home() {
+  // Workspace — start with static defaults to match SSR, then load from localStorage after mount
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([DEFAULT_WS]);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>(DEFAULT_WS.id);
+  const [wsDropdownOpen, setWsDropdownOpen] = useState(false);
+
+  const [data, setData] = useState<AppData>(DEFAULT_EMPTY_DATA);
+  const [selection, setSelection] = useState<Selection>(DEFAULT_SELECTION);
+  const [selectionLevel, setSelectionLevel] = useState<SelectionLevel>("campaign");
 
   // Panel widths: sidebar, editor (preview fills remaining)
-  const [panelWidths, setPanelWidths] = useState<[number, number]>(initialUi.panelWidths);
+  const [panelWidths, setPanelWidths] = useState<[number, number]>([260, 420]);
 
   // Dark mode
-  const [darkMode, setDarkMode] = useState(initialUi.darkMode);
+  const [darkMode, setDarkMode] = useState(false);
+
+  // Load from localStorage after mount (avoids SSR/client hydration mismatch)
+  useEffect(() => {
+    const wsList = loadWorkspaceList();
+    const wsId = loadActiveWsId(wsList);
+    const wsData = loadWorkspaceData(wsId);
+    const ui = loadUiPrefs();
+    setWorkspaces(wsList);
+    setActiveWorkspaceId(wsId);
+    setData(wsData.data);
+    setSelection(wsData.selection);
+    setSelectionLevel(wsData.level);
+    setPanelWidths(ui.panelWidths);
+    setDarkMode(ui.darkMode);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Export panel
   const [exportPanelOpen, setExportPanelOpen] = useState(false);
@@ -574,7 +669,8 @@ export default function Home() {
 
   // Preview
   const [feedMode, setFeedMode] = useState<"frame" | "feed">("frame");
-  const [previewZoom, setPreviewZoom] = useState(1);
+  const [frameZoom, setFrameZoom] = useState(1);
+  const [feedZoom, setFeedZoom] = useState(1);
 
   // Sidebar search
   const [sidebarSearch, setSidebarSearch] = useState("");
@@ -606,12 +702,22 @@ export default function Home() {
 
   // ── Persistence ────────────────────────────────────────────────
 
+  // Persist workspace list + active workspace id
+  useEffect(() => {
+    localStorage.setItem(WORKSPACES_KEY, JSON.stringify(workspaces));
+  }, [workspaces]);
+
+  useEffect(() => {
+    localStorage.setItem(ACTIVE_WS_KEY, activeWorkspaceId);
+  }, [activeWorkspaceId]);
+
+  // Persist current workspace data
   useEffect(() => {
     localStorage.setItem(
-      STORAGE_KEY,
+      WS_DATA_PREFIX + activeWorkspaceId,
       JSON.stringify({ data, selection, level: selectionLevel })
     );
-  }, [data, selection, selectionLevel]);
+  }, [data, selection, selectionLevel, activeWorkspaceId]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -641,22 +747,29 @@ export default function Home() {
     );
   }, [darkMode]);
 
-  // Auto-zoom preview to fit pane
+  // ZOOM_BASE: "100%" in the UI = scale(1.4) visually — what previously showed at 140%
+  const ZOOM_BASE = 1.4;
+
+  // Auto-zoom preview to fit pane — independent per mode
   useEffect(() => {
     const el = previewBodyRef.current;
     if (!el) return;
-    const FRAME_W = 300;
-    const FRAME_H = Math.round(300 * (2969 / 1842)); // ≈ 484
+    const CONTENT_W = 300;
+    const CONTENT_H = Math.round(300 * (2969 / 1842)); // ≈ 484, same for frame and feed
     const compute = () => {
       const { width, height } = el.getBoundingClientRect();
       if (!width || !height) return;
-      const zoom = Math.min((width - 32) / FRAME_W, (height - 32) / FRAME_H);
-      setPreviewZoom(Math.min(1.4, Math.max(0.5, +zoom.toFixed(2))));
+      // Divide by ZOOM_BASE so auto-fit initializes at zoom=1.0 (= 100% display, scale(1.4) visually)
+      const rawZoom = Math.min((width - 32) / CONTENT_W, (height - 32) / CONTENT_H);
+      const clamped = Math.min(1.4, Math.max(0.35, +(rawZoom / ZOOM_BASE).toFixed(2)));
+      setFrameZoom(clamped);
+      setFeedZoom(clamped);
     };
     compute();
     const ro = new ResizeObserver(compute);
     ro.observe(el);
     return () => ro.disconnect();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Derived ────────────────────────────────────────────────────
@@ -714,6 +827,44 @@ export default function Home() {
       }
       return next;
     });
+  }
+
+  // ── Workspace management ───────────────────────────────────────
+
+  function switchWorkspace(wsId: string) {
+    if (wsId === activeWorkspaceId) { setWsDropdownOpen(false); return; }
+    // Save current workspace data before switching
+    localStorage.setItem(
+      WS_DATA_PREFIX + activeWorkspaceId,
+      JSON.stringify({ data, selection, level: selectionLevel })
+    );
+    const { data: newData, selection: newSel, level: newLevel } = loadWorkspaceData(wsId);
+    setData(newData);
+    setSelection(newSel);
+    setSelectionLevel(newLevel);
+    setActiveWorkspaceId(wsId);
+    setWsDropdownOpen(false);
+  }
+
+  function createWorkspace() {
+    const name = `Workspace ${workspaces.length + 1}`;
+    const ws: Workspace = { id: newId("ws"), name, kind: "local" };
+    // Save current workspace before switching
+    localStorage.setItem(
+      WS_DATA_PREFIX + activeWorkspaceId,
+      JSON.stringify({ data, selection, level: selectionLevel })
+    );
+    const empty = emptyWorkspace();
+    setWorkspaces((prev) => [...prev, ws]);
+    setActiveWorkspaceId(ws.id);
+    setData(empty);
+    setSelection(defaultSelection(empty));
+    setSelectionLevel("campaign");
+    setWsDropdownOpen(false);
+  }
+
+  function renameWorkspace(wsId: string, name: string) {
+    setWorkspaces((prev) => prev.map((w) => w.id === wsId ? { ...w, name } : w));
   }
 
   // ── Soft delete with undo ──────────────────────────────────────
@@ -1304,11 +1455,42 @@ export default function Home() {
 
   function renderSidebar() {
     const hasClients = data.clients.length > 0;
+    const activeWs = workspaces.find((w) => w.id === activeWorkspaceId) ?? workspaces[0];
 
     return (
       <>
         <div className="pane-header">
-          <span className="pane-header-title">Workspace</span>
+          {/* Workspace dropdown */}
+          <div className="ws-dropdown-wrap">
+            <button
+              className="ws-dropdown-btn"
+              onClick={() => setWsDropdownOpen((o) => !o)}
+            >
+              <IconWorkspace />
+              <span className="ws-dropdown-name">{activeWs?.name ?? "Workspace"}</span>
+              <IconChevronDown />
+            </button>
+            {wsDropdownOpen && (
+              <div className="ws-dropdown-menu">
+                {workspaces.map((ws) => (
+                  <button
+                    key={ws.id}
+                    className={`ws-dropdown-item${ws.id === activeWorkspaceId ? " is-active" : ""}`}
+                    onClick={() => switchWorkspace(ws.id)}
+                  >
+                    <IconWorkspace />
+                    <span>{ws.name}</span>
+                    {ws.id === activeWorkspaceId && <span className="ws-check">✓</span>}
+                  </button>
+                ))}
+                <div className="ws-dropdown-divider" />
+                <button className="ws-dropdown-item ws-dropdown-new" onClick={createWorkspace}>
+                  <IconPlus />
+                  <span>New Workspace</span>
+                </button>
+              </div>
+            )}
+          </div>
           <div style={{ flex: 1 }} />
           <button
             className="btn btn-primary btn-sm"
@@ -1795,6 +1977,58 @@ export default function Home() {
                 placeholder="e.g. Drive sign-ups for spring launch"
               />
             </div>
+            <div className="form-group">
+              <label className="form-label">Audience Profiles</label>
+              <textarea
+                className="form-textarea"
+                rows={4}
+                value={audienceDraft}
+                onChange={(e) =>
+                  setSettingsDraft((prev) => ({
+                    ...prev,
+                    [project.id]: {
+                      audienceText: e.target.value,
+                      pillarsText: prev[project.id]?.pillarsText ?? pillarsDraft,
+                    },
+                  }))
+                }
+                onBlur={commitAudienceDraft}
+                placeholder={"Young Professionals 25–34\nParents of Toddlers\nHealth-Conscious Millennials"}
+              />
+              <span className="form-hint">One audience per line</span>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Message Pillars</label>
+              <textarea
+                className="form-textarea"
+                rows={3}
+                value={pillarsDraft}
+                onChange={(e) =>
+                  setSettingsDraft((prev) => ({
+                    ...prev,
+                    [project.id]: {
+                      audienceText: prev[project.id]?.audienceText ?? audienceDraft,
+                      pillarsText: e.target.value,
+                    },
+                  }))
+                }
+                onBlur={commitPillarsDraft}
+                placeholder={"Save time\nPremium quality\nSocial proof"}
+              />
+              <span className="form-hint">One pillar per line</span>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Brand Guardrails</label>
+              <textarea
+                className="form-textarea"
+                rows={2}
+                value={project.guardrails}
+                onChange={(e) =>
+                  updateProject(project.id, { guardrails: e.target.value })
+                }
+                placeholder="e.g. No competitor mentions. Use inclusive language."
+              />
+            </div>
           </div>
 
           <div className="section-divider" style={{ margin: "0 0 4px" }} />
@@ -1905,139 +2139,8 @@ export default function Home() {
 
     return (
       <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
-        {/* Tab bar */}
-        <div className="tab-bar">
-          <button
-            className={`tab${editorMode === "campaign-settings" ? " is-active" : ""}`}
-            onClick={() => setEditorMode("campaign-settings")}
-          >
-            Campaign
-          </button>
-          <button
-            className={`tab${editorMode === "campaign" ? " is-active" : ""}`}
-            onClick={() => setEditorMode("campaign")}
-          >
-            Ad
-          </button>
-        </div>
-
         <div className="pane-body">
-          {editorMode === "campaign-settings" ? (
-            /* Campaign Settings */
-            <div className="form-section">
-              <div className="form-group">
-                <label className="form-label">Project Name</label>
-                <input
-                  className="form-input"
-                  value={project.name}
-                  onChange={(e) => updateProject(project.id, { name: e.target.value })}
-                  placeholder="Project name"
-                />
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label className="form-label">Objective</label>
-                  <div className="form-select-wrap">
-                    <select
-                      className="form-select"
-                      value={project.objective}
-                      onChange={(e) =>
-                        updateProject(project.id, {
-                          objective: e.target.value as CampaignObjective,
-                        })
-                      }
-                    >
-                      {OBJECTIVE_OPTIONS.map((o) => (
-                        <option key={o} value={o}>{o}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Default CTA</label>
-                  <div className="form-select-wrap">
-                    <select
-                      className="form-select"
-                      value={project.defaultCta}
-                      onChange={(e) =>
-                        updateProject(project.id, {
-                          defaultCta: e.target.value as CtaOption,
-                        })
-                      }
-                    >
-                      {CTA_OPTIONS.map((o) => (
-                        <option key={o} value={o}>{o}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Primary Goal</label>
-                <input
-                  className="form-input"
-                  value={project.primaryGoal}
-                  onChange={(e) =>
-                    updateProject(project.id, { primaryGoal: e.target.value })
-                  }
-                  placeholder="e.g. Drive sign-ups for spring launch"
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Audience Profiles</label>
-                <textarea
-                  className="form-textarea"
-                  rows={5}
-                  value={audienceDraft}
-                  onChange={(e) =>
-                    setSettingsDraft((prev) => ({
-                      ...prev,
-                      [project.id]: {
-                        audienceText: e.target.value,
-                        pillarsText: prev[project.id]?.pillarsText ?? pillarsDraft,
-                      },
-                    }))
-                  }
-                  onBlur={commitAudienceDraft}
-                  placeholder={"Young Professionals 25–34\nParents of Toddlers\nHealth-Conscious Millennials"}
-                />
-                <span className="form-hint">One audience per line</span>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Message Pillars</label>
-                <textarea
-                  className="form-textarea"
-                  rows={4}
-                  value={pillarsDraft}
-                  onChange={(e) =>
-                    setSettingsDraft((prev) => ({
-                      ...prev,
-                      [project.id]: {
-                        audienceText: prev[project.id]?.audienceText ?? audienceDraft,
-                        pillarsText: e.target.value,
-                      },
-                    }))
-                  }
-                  onBlur={commitPillarsDraft}
-                  placeholder={"Save time\nPremium quality\nSocial proof"}
-                />
-                <span className="form-hint">One pillar per line</span>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Brand Guardrails</label>
-                <textarea
-                  className="form-textarea"
-                  rows={3}
-                  value={project.guardrails}
-                  onChange={(e) =>
-                    updateProject(project.id, { guardrails: e.target.value })
-                  }
-                  placeholder="e.g. No competitor mentions. Use inclusive language."
-                />
-              </div>
-            </div>
-          ) : (
-            /* Ad Editor */
+          {/* Ad Editor (only mode now — campaign settings live on project view) */}
             <div className="form-section">
               <div className="form-group">
                 <label className="form-label">Ad Name</label>
@@ -2143,10 +2246,14 @@ export default function Home() {
                     <button
                       className="btn btn-ghost btn-sm"
                       onClick={() => {
-                        navigator.clipboard.writeText(campaign.primaryText).then(() => {
-                          setCopyFlash(true);
-                          setTimeout(() => setCopyFlash(false), 1200);
-                        });
+                        const flash = () => { setCopyFlash(true); setTimeout(() => setCopyFlash(false), 1200); };
+                        if (navigator.clipboard) {
+                          navigator.clipboard.writeText(campaign.primaryText).then(flash).catch(() => {
+                            try { document.execCommand("copy"); flash(); } catch { /* ignore */ }
+                          });
+                        } else {
+                          try { document.execCommand("copy"); flash(); } catch { /* ignore */ }
+                        }
                       }}
                     >
                       Copy
@@ -2233,7 +2340,6 @@ export default function Home() {
                 </button>
               </div>
             </div>
-          )}
         </div>
       </div>
     );
@@ -2274,34 +2380,25 @@ export default function Home() {
               Feed
             </button>
           </div>
-          {/* Upload button — always visible */}
-          <label className="btn btn-secondary btn-sm" style={{ cursor: "pointer" }} title="Upload media">
-            <input
-              type="file"
-              accept="image/*,video/*"
-              style={{ display: "none" }}
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-                const url = URL.createObjectURL(file);
-                const kind = file.type.startsWith("video/") ? "video" : "image";
-                setCampaignMedia(campaign.id, { kind, url } as PreviewMedia);
-                e.target.value = "";
-              }}
-            />
-            ↑ Upload
-          </label>
           <div className="zoom-controls">
             <button
               className="zoom-btn"
-              onClick={() => setPreviewZoom((z) => Math.max(0.5, +(z - 0.1).toFixed(1)))}
+              onClick={() => {
+                if (feedMode === "frame") setFrameZoom((z) => Math.max(0.35, +(z - 0.1).toFixed(1)));
+                else setFeedZoom((z) => Math.max(0.35, +(z - 0.1).toFixed(1)));
+              }}
             >
               −
             </button>
-            <span className="zoom-label">{Math.round(previewZoom * 100)}%</span>
+            <span className="zoom-label">
+              {Math.round((feedMode === "frame" ? frameZoom : feedZoom) * 100)}%
+            </span>
             <button
               className="zoom-btn"
-              onClick={() => setPreviewZoom((z) => Math.min(1.4, +(z + 0.1).toFixed(1)))}
+              onClick={() => {
+                if (feedMode === "frame") setFrameZoom((z) => Math.min(1.4, +(z + 0.1).toFixed(1)));
+                else setFeedZoom((z) => Math.min(1.4, +(z + 0.1).toFixed(1)));
+              }}
             >
               +
             </button>
@@ -2310,12 +2407,12 @@ export default function Home() {
 
         {/* Preview body — ref used for auto-zoom */}
         <div className="preview-body" ref={previewBodyRef}>
+          {/* Feed view — routed by platform */}
           <div
             className="preview-scaled"
-            style={{ transform: `scale(${previewZoom})` }}
+            style={{ display: feedMode === "feed" ? "flex" : "none", transform: `scale(${feedZoom * ZOOM_BASE})` }}
           >
-            {/* Feed view */}
-            <div style={{ display: feedMode === "feed" ? "block" : "none" }}>
+            {campaign.platform === "Instagram Feed" && (
               <FeedScroll
                 primaryText={campaign.primaryText}
                 cta={campaign.cta}
@@ -2327,23 +2424,71 @@ export default function Home() {
                 clientAvatarUrl={client.profileImageDataUrl}
                 media={selectedMedia}
               />
-            </div>
-            {/* Frame view — always mounted so canvasRef export works in both modes */}
-            <div style={{ display: feedMode === "frame" ? "block" : "none" }}>
-              <PreviewCanvas
-                ref={canvasRef}
+            )}
+            {campaign.platform === "Instagram Story" && (
+              <StoryFeedScroll
                 primaryText={campaign.primaryText}
                 cta={campaign.cta}
                 ctaBgColor={campaign.ctaBgColor}
                 ctaTextColor={campaign.ctaTextColor}
-                platform={campaign.platform}
+                clientName={client.name}
+                clientAvatarUrl={client.profileImageDataUrl}
+                media={selectedMedia}
+              />
+            )}
+            {campaign.platform === "Facebook Feed" && (
+              <FacebookFeedScroll
+                primaryText={campaign.primaryText}
+                cta={campaign.cta}
+                ctaBgColor={campaign.ctaBgColor}
+                ctaTextColor={campaign.ctaTextColor}
                 mediaAspect={campaign.mediaAspect}
                 clientName={client.name}
                 clientAvatarUrl={client.profileImageDataUrl}
                 media={selectedMedia}
-                onMediaChange={(m) => setCampaignMedia(campaign.id, m)}
               />
-            </div>
+            )}
+            {campaign.platform === "TikTok" && (
+              <TikTokFeedScroll
+                primaryText={campaign.primaryText}
+                cta={campaign.cta}
+                ctaBgColor={campaign.ctaBgColor}
+                ctaTextColor={campaign.ctaTextColor}
+                clientName={client.name}
+                clientAvatarUrl={client.profileImageDataUrl}
+                media={selectedMedia}
+              />
+            )}
+            {campaign.platform === "Instagram Reels" && (
+              <ReelsFeedScroll
+                primaryText={campaign.primaryText}
+                cta={campaign.cta}
+                ctaBgColor={campaign.ctaBgColor}
+                ctaTextColor={campaign.ctaTextColor}
+                clientName={client.name}
+                clientAvatarUrl={client.profileImageDataUrl}
+                media={selectedMedia}
+              />
+            )}
+          </div>
+          {/* Frame view — always mounted so canvasRef export works in both modes */}
+          <div
+            className="preview-scaled"
+            style={{ display: feedMode === "frame" ? "flex" : "none", transform: `scale(${frameZoom * ZOOM_BASE})` }}
+          >
+            <PreviewCanvas
+              ref={canvasRef}
+              primaryText={campaign.primaryText}
+              cta={campaign.cta}
+              ctaBgColor={campaign.ctaBgColor}
+              ctaTextColor={campaign.ctaTextColor}
+              platform={campaign.platform}
+              mediaAspect={campaign.mediaAspect}
+              clientName={client.name}
+              clientAvatarUrl={client.profileImageDataUrl}
+              media={selectedMedia}
+              onMediaChange={(m) => setCampaignMedia(campaign.id, m)}
+            />
           </div>
         </div>
       </div>
@@ -2468,7 +2613,9 @@ export default function Home() {
     }
 
     return (
-      <div className="export-overlay" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
+      <>
+        {/* Transparent backdrop to close on outside click */}
+        <div className="export-backdrop" onClick={close} />
         <div className="export-panel">
           <div className="export-handle" />
           <div className="export-context-label">{contextLabel}</div>
@@ -2660,7 +2807,7 @@ export default function Home() {
             Cancel
           </button>
         </div>
-      </div>
+      </>
     );
   }
 
