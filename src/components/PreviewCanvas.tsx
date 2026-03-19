@@ -11,6 +11,7 @@ type MediaAspect = "1:1" | "3:4" | "9:16";
 type Props = {
   primaryText: string;
   cta: string;
+  ctaVisible?: boolean;
   ctaBgColor: string;
   ctaTextColor: string;
   platform: string;
@@ -178,6 +179,7 @@ function isStoryLikePlatform(platform: string): boolean {
 export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function PreviewCanvas({
   primaryText,
   cta,
+  ctaVisible = true,
   ctaBgColor,
   ctaTextColor,
   platform,
@@ -628,6 +630,75 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     }
   }
 
+  function drawStoryCtaPill(
+    ctx: CanvasRenderingContext2D,
+    ctaText: string,
+    bgColor: string,
+    textColor: string
+  ) {
+    const s = layout.scale;
+    const text = fitText(ctaText || "Learn More", 16);
+    const width = Math.max(138 * s, ctx.measureText(text).width + 54 * s);
+    const height = 38 * s;
+    const x = layout.screen.x + (layout.screen.w - width) / 2;
+    const y = layout.screen.y + layout.screen.h - 82 * s;
+
+    ctx.save();
+    ctx.translate(x + width / 2, y + height / 2);
+    ctx.rotate((-6 * Math.PI) / 180);
+    ctx.translate(-(x + width / 2), -(y + height / 2));
+
+    ctx.fillStyle = bgColor;
+    fillRoundedRect(
+      ctx,
+      {
+        x,
+        y,
+        w: width,
+        h: height,
+      },
+      10 * s
+    );
+
+    ctx.strokeStyle = textColor;
+    ctx.lineWidth = Math.max(1, 2 * s);
+    ctx.beginPath();
+    ctx.arc(x + 20 * s, y + 19 * s, 7 * s, Math.PI * 0.15, Math.PI * 1.15);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x + 30 * s, y + 19 * s, 7 * s, Math.PI * 1.15, Math.PI * 2.15);
+    ctx.stroke();
+
+    ctx.fillStyle = textColor;
+    ctx.font = `700 ${12 * s}px ${FONT_STACK}`;
+    ctx.fillText(text, x + 44 * s, y + 24 * s);
+    ctx.restore();
+  }
+
+  async function drawStoryFooterActions(ctx: CanvasRenderingContext2D, tone: string = "#ffffff") {
+    const icons = await Promise.all(
+      FEED_ACTION_ICON_PATHS.slice(0, 3).map((path) => loadImageFromUrl(path))
+    );
+    const s = layout.scale;
+    const size = 22 * s;
+    const gap = 10 * s;
+    const footerCenterY = layout.screen.y + layout.screen.h - 23 * s;
+    const totalWidth = size * 3 + gap * 2;
+    let x = layout.screen.x + layout.screen.w - 12 * s - totalWidth;
+
+    for (const icon of icons) {
+      if (icon) {
+        drawTintedImage(
+          ctx,
+          icon,
+          { x, y: footerCenterY - size / 2, w: size, h: size },
+          tone
+        );
+      }
+      x += size + gap;
+    }
+  }
+
   function drawFBHeader(ctx: CanvasRenderingContext2D) {
     const s = layout.scale;
     // White status bar area
@@ -930,60 +1001,166 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     ctx.clip();
 
     if (storyMode) {
-      const mediaTop = layout.screen.y * layout.scale;
-      const mediaHeight = Math.min(
-        layout.screen.w / aspectToRatio("9:16"),
-        layout.screen.h - 168 * layout.scale
-      );
-      const mediaRect: Rect = {
-        x: layout.screen.x,
-        y: mediaTop,
-        w: layout.screen.w,
-        h: mediaHeight,
-      };
+      const plt = platform.toLowerCase();
+      const isInstagramStory =
+        plt.includes("story") && !plt.includes("reels") && !plt.includes("tiktok");
 
-      drawMediaPlaceholder(ctx, mediaRect);
-      await drawPlacedMedia(ctx, mediaRect);
+      if (isInstagramStory) {
+        ctx.fillStyle = "#111111";
+        ctx.fillRect(layout.screen.x, layout.screen.y, layout.screen.w, layout.screen.h);
 
-      drawStoryHeader(ctx, safeClientName, avatarImage, platform);
+        const domWrapperW = 340;
+        const domWrapperH = Math.round((domWrapperW * FRAME_NATIVE.h) / FRAME_NATIVE.w);
+        const domScreenW = domWrapperW * 0.6402;
+        const domScreenH = domWrapperH * 0.8609;
+        const sx = layout.screen.w / domScreenW;
+        const sy = layout.screen.h / domScreenH;
+        const ss = Math.min(sx, sy);
 
-      ctx.fillStyle = "rgba(255,255,255,0.18)";
-      fillRoundedRect(
-        ctx,
-        {
-          x: layout.screen.x + layout.screen.w - 92 * layout.scale,
-          y: layout.screen.y + 28 * layout.scale,
-          w: 76 * layout.scale,
-          h: 24 * layout.scale,
-        },
-        12 * layout.scale
-      );
-      
+        const mediaRect: Rect = {
+          x: layout.screen.x,
+          y: layout.screen.y + 28 * sy,
+          w: layout.screen.w,
+          h: layout.screen.h - (28 + 48) * sy,
+        };
 
-      ctx.fillStyle = "rgba(255,255,255,0.95)";
-      ctx.font = `500 ${12 * layout.scale}px ${FONT_STACK}`;
-      drawWrappedText(
-        ctx,
-        primaryText || "Write your campaign body copy to preview it here.",
-        mediaRect.x + 14 * layout.scale,
-        mediaRect.y + mediaRect.h - 84 * layout.scale,
-        mediaRect.w - 28 * layout.scale,
-        2,
-        15 * layout.scale
-      );
+        drawMediaPlaceholder(ctx, mediaRect);
+        await drawPlacedMedia(ctx, mediaRect);
 
-      drawCtaBar(
-        ctx,
-        {
-          x: mediaRect.x,
-          y: mediaRect.y + mediaRect.h + 1 * layout.scale,
-          w: mediaRect.w,
-          h: 42 * layout.scale,
-        },
-        cta,
-        resolvedCtaBgColor,
-        resolvedCtaTextColor
-      );
+        const topFade = ctx.createLinearGradient(
+          layout.screen.x,
+          layout.screen.y,
+          layout.screen.x,
+          layout.screen.y + 108 * sy
+        );
+        topFade.addColorStop(0, "rgba(0,0,0,0.24)");
+        topFade.addColorStop(0.42, "rgba(0,0,0,0.12)");
+        topFade.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = topFade;
+        ctx.fillRect(layout.screen.x, layout.screen.y, layout.screen.w, 108 * sy);
+
+        const barGap = 3 * sx;
+        const barX = layout.screen.x + 8 * sx;
+        const barY = layout.screen.y + 30 * sy;
+        const barW = (layout.screen.w - 16 * sx - barGap * 3) / 4;
+        for (let i = 0; i < 4; i += 1) {
+          ctx.fillStyle = i < 2 ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.25)";
+          fillRoundedRect(
+            ctx,
+            {
+              x: barX + i * (barW + barGap),
+              y: barY,
+              w: barW,
+              h: 2 * sy,
+            },
+            sy
+          );
+        }
+
+        drawAvatar(
+          ctx,
+          layout.screen.x + 24 * sx,
+          layout.screen.y + 54 * sy,
+          14 * ss,
+          avatarImage
+        );
+
+        ctx.fillStyle = "#ffffff";
+        ctx.font = `700 ${9 * ss}px ${FONT_STACK}`;
+        ctx.fillText(
+          fitText(safeClientName, 20),
+          layout.screen.x + 46 * sx,
+          layout.screen.y + 49 * sy
+        );
+
+        ctx.fillStyle = "rgba(255,255,255,0.95)";
+        ctx.font = `500 ${14 * ss}px ${FONT_STACK}`;
+        ctx.fillText("⋯", layout.screen.x + layout.screen.w - 38 * sx, layout.screen.y + 54 * sy);
+        ctx.fillText("×", layout.screen.x + layout.screen.w - 16 * sx, layout.screen.y + 54 * sy);
+
+        if (primaryText) {
+          ctx.fillStyle = "#ffffff";
+          ctx.font = `600 ${11 * ss}px ${FONT_STACK}`;
+          drawWrappedText(
+            ctx,
+            primaryText,
+            layout.screen.x + 10 * sx,
+            layout.screen.y + layout.screen.h - 72 * sy,
+            layout.screen.w - 20 * sx,
+            2,
+            15.4 * sy
+          );
+        }
+
+        ctx.fillStyle = "#ffffff";
+        ctx.font = `500 ${12 * ss}px ${FONT_STACK}`;
+        ctx.fillText("Ad", layout.screen.x + 12 * sx, layout.screen.y + layout.screen.h - 13 * sy);
+
+        await drawStoryFooterActions(ctx);
+
+        if (ctaVisible) {
+          drawStoryCtaPill(
+            ctx,
+            cta,
+            resolvedCtaBgColor,
+            resolvedCtaTextColor
+          );
+        }
+      } else {
+        const mediaTop = layout.screen.y * layout.scale;
+        const mediaHeight = Math.min(
+          layout.screen.w / aspectToRatio("9:16"),
+          layout.screen.h - 168 * layout.scale
+        );
+        const mediaRect: Rect = {
+          x: layout.screen.x,
+          y: mediaTop,
+          w: layout.screen.w,
+          h: mediaHeight,
+        };
+
+        drawMediaPlaceholder(ctx, mediaRect);
+        await drawPlacedMedia(ctx, mediaRect);
+
+        drawStoryHeader(ctx, safeClientName, avatarImage, platform);
+
+        ctx.fillStyle = "rgba(255,255,255,0.18)";
+        fillRoundedRect(
+          ctx,
+          {
+            x: layout.screen.x + layout.screen.w - 92 * layout.scale,
+            y: layout.screen.y + 28 * layout.scale,
+            w: 76 * layout.scale,
+            h: 24 * layout.scale,
+          },
+          12 * layout.scale
+        );
+
+        ctx.fillStyle = "rgba(255,255,255,0.95)";
+        ctx.font = `500 ${12 * layout.scale}px ${FONT_STACK}`;
+        drawWrappedText(
+          ctx,
+          primaryText || "Write your campaign body copy to preview it here.",
+          mediaRect.x + 14 * layout.scale,
+          mediaRect.y + mediaRect.h - 84 * layout.scale,
+          mediaRect.w - 28 * layout.scale,
+          2,
+          15 * layout.scale
+        );
+
+        drawCtaBar(
+          ctx,
+          {
+            x: mediaRect.x,
+            y: mediaRect.y + mediaRect.h + 1 * layout.scale,
+            w: mediaRect.w,
+            h: 42 * layout.scale,
+          },
+          cta,
+          resolvedCtaBgColor,
+          resolvedCtaTextColor
+        );
+      }
     } else {
       const isFacebook = platform.toLowerCase().includes("facebook");
       ctx.fillStyle = "#ffffff";

@@ -1014,14 +1014,14 @@ html, body {
   color: #262626;
   letter-spacing: -0.04em;
   line-height: 1;
-  transform: translateY(-1px);
+  transform: translateY(-4px) translateX(10px);
 }
 .feed-status-right {
   display: flex;
   align-items: center;
   gap: 4px;
   color: #0f1115;
-  transform: translateY(-1px);
+  transform: translateY(-4px);
 }
 .feed-status-signal {
   display: flex;
@@ -1030,7 +1030,7 @@ html, body {
   height: 10px;
 }
 .feed-status-signal-bar {
-  width: 2.5px;
+  width: 2px;
   height: 5px;
   border-radius: 999px;
   background: #111318;
@@ -1047,14 +1047,14 @@ html, body {
   justify-content: center;
 }
 .feed-status-battery {
-  min-width: 24px;
-  height: 14px;
+  min-width: 18px;
+  height: 10px;
   border-radius: 7px;
   background: linear-gradient(90deg, #0f1115 0 70%, #d7d7dc 70% 100%);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0 5px;
+  padding: 0 3px;
   position: relative;
 }
 .feed-status-battery::after {
@@ -1069,7 +1069,7 @@ html, body {
   transform: translateY(-50%);
 }
 .feed-status-battery-value {
-  font-size: 9px;
+  font-size: 7px;
   font-weight: 700;
   letter-spacing: -0.03em;
   color: #ffffff;
@@ -1163,8 +1163,8 @@ html, body {
   letter-spacing: -0.025em;
 }
 .feed-ad-verified {
-  width: 12px;
-  height: 12px;
+  width: 8px;
+  height: 8px;
   background: #0095f6;
   display: inline-block;
   flex-shrink: 0;
@@ -1188,12 +1188,13 @@ html, body {
   border: none;
   background: #f2f4f7;
   color: #1c1c1e;
-  border-radius: 10px;
-  padding: 6px 11px;
-  font-size: 8.5px;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 9px;
   font-weight: 700;
   line-height: 1;
   letter-spacing: -0.02em;
+  display: none;
 }
 .feed-ad-media {
   width: 100%;
@@ -1207,6 +1208,7 @@ html, body {
   padding: 8px 12px;
   font-size: 9px;
   font-weight: 700;
+  letter-spacing: -0.2px;
   cursor: pointer;
 }
 .feed-ad-actions {
@@ -1218,14 +1220,14 @@ html, body {
 .feed-ad-action-item {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 1px;
   color: #262626;
 }
 .feed-ad-action-count {
   font-size: 8.5px;
   font-weight: 600;
   color: #262626;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.05em;
 }
 .feed-ad-caption {
   padding: 2px 9px 8px;
@@ -1671,7 +1673,7 @@ html, body {
   height: 28px;
   border-radius: 50%;
   overflow: hidden;
-  border: 1.5px solid rgba(255,255,255,0.7);
+  border: 0.5px solid rgba(255,255,255,0.7);
   flex-shrink: 0;
 }
 
@@ -1689,14 +1691,9 @@ html, body {
 }
 
 .story-username {
-  font-size: 11px;
+  font-size: 9px;
   font-weight: 700;
   color: #fff;
-}
-
-.story-sponsored {
-  font-size: 9px;
-  color: rgba(255,255,255,0.6);
 }
 
 .story-header-icon {
@@ -1711,6 +1708,23 @@ html, body {
   overflow: hidden;
 }
 
+.story-top-gradient {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 108px;
+  background: linear-gradient(180deg, rgba(0,0,0,0.24) 0%, rgba(0,0,0,0.12) 42%, rgba(0,0,0,0) 100%);
+  z-index: 2;
+  pointer-events: none;
+}
+
+.story-media-ad {
+  margin-top: 28px;
+  margin-bottom: 48px;
+  border-radius: 0;
+}
+
 .story-placeholder {
   width: 100%;
   height: 100%;
@@ -1723,7 +1737,7 @@ html, body {
 
 .story-caption {
   position: absolute;
-  bottom: 70px;
+  bottom: 72px;
   left: 10px;
   right: 10px;
   font-size: 11px;
@@ -1732,6 +1746,36 @@ html, body {
   text-shadow: 0 1px 4px rgba(0,0,0,0.7);
   z-index: 2;
   line-height: 1.4;
+}
+
+.story-footer-actions {
+  position: absolute;
+  right: 12px;
+  bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.story-action-icon {
+  display: block;
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  filter: brightness(0) invert(1);
+}
+
+.story-footer-label {
+  position: absolute;
+  left: 12px;
+  bottom: 18px;
+  z-index: 4;
+  pointer-events: none;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .story-cta-pill {

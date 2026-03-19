@@ -44,7 +44,8 @@ type Campaign = {
   platform: Platform;
   mediaAspect: MediaAspect;
   primaryText: string;
-  cta: CtaOption;
+  cta: string;
+  ctaVisible: boolean;
   audienceProfile: string;
   messagePillar: string;
   ctaBgColor: string;
@@ -204,6 +205,7 @@ function newCampaign(
     mediaAspect: "1:1",
     primaryText: "",
     cta: opts?.defaultCta ?? "Learn More",
+    ctaVisible: true,
     audienceProfile: opts?.audienceProfile ?? "",
     messagePillar: opts?.messagePillar ?? "",
     ctaBgColor,
@@ -235,6 +237,14 @@ function normalizeCampaign(c: Campaign): Campaign {
   return {
     ...c,
     mediaAspect: normalizeAspect(c.platform, c.mediaAspect),
+    cta:
+      typeof (c as { cta?: unknown }).cta === "string"
+        ? ((c as { cta?: string }).cta ?? "Learn More")
+        : "Learn More",
+    ctaVisible:
+      typeof (c as { ctaVisible?: unknown }).ctaVisible === "boolean"
+        ? ((c as { ctaVisible?: boolean }).ctaVisible ?? true)
+        : true,
     audienceProfile:
       typeof (c as { audienceProfile?: unknown }).audienceProfile === "string"
         ? (c.audienceProfile ?? "")
@@ -2206,6 +2216,7 @@ export default function Home() {
 
     const campaign = selectedCampaign;
     const project = selectedProject;
+    const isInstagramStory = campaign.platform === "Instagram Story";
 
     return (
       <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -2341,20 +2352,31 @@ export default function Home() {
 
               <div className="form-row">
                 <div className="form-group">
-                  <label className="form-label">CTA</label>
-                  <div className="form-select-wrap">
-                    <select
-                      className="form-select"
+                  <label className="form-label">
+                    {isInstagramStory ? "CTA Text" : "CTA"}
+                  </label>
+                  {isInstagramStory ? (
+                    <input
+                      className="form-input"
                       value={campaign.cta}
-                      onChange={(e) =>
-                        updateCampaign({ cta: e.target.value as CtaOption })
-                      }
-                    >
-                      {CTA_OPTIONS.map((o) => (
-                        <option key={o} value={o}>{o}</option>
-                      ))}
-                    </select>
-                  </div>
+                      onChange={(e) => updateCampaign({ cta: e.target.value })}
+                      placeholder="e.g. Learn More"
+                    />
+                  ) : (
+                    <div className="form-select-wrap">
+                      <select
+                        className="form-select"
+                        value={campaign.cta}
+                        onChange={(e) =>
+                          updateCampaign({ cta: e.target.value })
+                        }
+                      >
+                        {CTA_OPTIONS.map((o) => (
+                          <option key={o} value={o}>{o}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
                 <div className="form-group">
                   <label className="form-label">CTA Colour</label>
@@ -2384,6 +2406,24 @@ export default function Home() {
                   </div>
                 </div>
               </div>
+
+              {isInstagramStory && (
+                <div className="form-group">
+                  <label
+                    className="form-label"
+                    style={{ display: "flex", alignItems: "center", gap: 8 }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={campaign.ctaVisible}
+                      onChange={(e) =>
+                        updateCampaign({ ctaVisible: e.target.checked })
+                      }
+                    />
+                    Show CTA
+                  </label>
+                </div>
+              )}
 
               {/* Status toggle */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: 4 }}>
@@ -2502,6 +2542,7 @@ export default function Home() {
               <StoryFeedScroll
                 primaryText={campaign.primaryText}
                 cta={campaign.cta}
+                ctaVisible={campaign.ctaVisible}
                 ctaBgColor={campaign.ctaBgColor}
                 ctaTextColor={campaign.ctaTextColor}
                 clientName={client.name}
@@ -2554,6 +2595,7 @@ export default function Home() {
               ref={canvasRef}
               primaryText={campaign.primaryText}
               cta={campaign.cta}
+              ctaVisible={campaign.ctaVisible}
               ctaBgColor={campaign.ctaBgColor}
               ctaTextColor={campaign.ctaTextColor}
               platform={campaign.platform}

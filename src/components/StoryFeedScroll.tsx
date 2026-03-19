@@ -6,6 +6,7 @@ import type { PreviewMedia } from "./PreviewCanvas";
 export type StoryFeedScrollProps = {
   primaryText: string;
   cta: string;
+  ctaVisible?: boolean;
   ctaBgColor: string;
   ctaTextColor: string;
   clientName: string;
@@ -24,9 +25,24 @@ const FAKE_STORIES = [
 const AD_INDEX = 1;
 const TOTAL = FAKE_STORIES.length + 1; // 4 stories total
 
+function StoryActionIcon({ src, size = 22 }: { src: string; size?: number }) {
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt=""
+      width={size}
+      height={size}
+      className="story-action-icon"
+      draggable={false}
+    />
+  );
+}
+
 export function StoryFeedScroll({
   primaryText,
   cta,
+  ctaVisible = true,
   ctaBgColor,
   ctaTextColor,
   clientName,
@@ -71,7 +87,7 @@ export function StoryFeedScroll({
 
         {/* ── Background media / colour ── */}
         {isAd ? (
-          <div className="story-media">
+          <div className="story-media story-media-ad">
             {hasMedia ? (
               media.kind === "image" ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -110,6 +126,8 @@ export function StoryFeedScroll({
           </div>
         )}
 
+        <div className="story-top-gradient" />
+
         {/* ── Overlay chrome (progress + header + tap zones) ── */}
         <div className="story-chrome">
           {/* Progress bars */}
@@ -143,11 +161,10 @@ export function StoryFeedScroll({
             </div>
             <div className="story-header-info">
               <span className="story-username">{displayName}</span>
-              {isAd && <span className="story-sponsored">Sponsored</span>}
             </div>
             <div style={{ flex: 1 }} />
-            <span className="story-header-icon">✕</span>
-            <span className="story-header-icon" style={{ marginLeft: 8 }}>⋯</span>
+            <span className="story-header-icon">⋯</span>
+            <span className="story-header-icon" style={{ marginLeft: 8 }}>✕</span>
           </div>
 
           {/* Left / right tap zones */}
@@ -162,6 +179,16 @@ export function StoryFeedScroll({
           <div className="story-caption">{primaryText.slice(0, 120)}</div>
         )}
         {isAd && (
+          <>
+            <div className="story-footer-label">Ad</div>
+            <div className="story-footer-actions">
+              <StoryActionIcon src="/images/ig_heart.svg" />
+              <StoryActionIcon src="/images/ig_comment.svg" />
+              <StoryActionIcon src="/images/ig_send.svg" />
+            </div>
+          </>
+        )}
+        {isAd && ctaVisible && (
           <div className="story-cta-pill" style={{ background: ctaBgColor, color: ctaTextColor }}>
             {/* Chain-link icon */}
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
