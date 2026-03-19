@@ -122,9 +122,7 @@ export function StoryFeedScroll({
                   i === storyIdx ? "story-bar-active" :
                   "story-bar-empty"
                 }`}
-              >
-                {i === storyIdx && <div className="story-bar-fill" style={{ width: "42%" }} />}
-              </div>
+              />
             ))}
           </div>
 
