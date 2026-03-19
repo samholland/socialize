@@ -51,3 +51,9 @@ Add a stock images to the sample feed
 
 
 
+## Workspace
+
+Add Group and Private sections to Workspace
+ - drag and drop projects between sections
+
+ 
