@@ -995,23 +995,85 @@ html, body {
 .feed-screen::-webkit-scrollbar { display: none; }
 
 /* Feed IG chrome */
-.feed-top-bar {
+.feed-status-bar {
   position: sticky;
   top: 0;
-  background: #fff;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid #efefef;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 26px 10px 6px;
+  padding: 14px 16px 4px;
   z-index: 5;
 }
-.feed-top-logo {
-  font-size: 16px;
+.feed-status-time {
+  font-size: 10.5px;
   font-weight: 700;
-  font-family: "Georgia", serif;
   color: #262626;
-  letter-spacing: -0.5px;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  transform: translateY(-1px);
+}
+.feed-status-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #0f1115;
+  transform: translateY(-1px);
+}
+.feed-status-signal {
+  display: flex;
+  align-items: flex-end;
+  gap: 1.5px;
+  height: 10px;
+}
+.feed-status-signal-bar {
+  width: 2.5px;
+  height: 5px;
+  border-radius: 999px;
+  background: #111318;
+}
+.feed-status-signal-bar:nth-child(2) { height: 6.5px; }
+.feed-status-signal-bar:nth-child(3) { height: 8px; }
+.feed-status-signal-bar:nth-child(4) { height: 10px; }
+.feed-status-signal-bar.is-muted {
+  background: #cfcfd4;
+}
+.feed-status-wifi {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.feed-status-battery {
+  min-width: 24px;
+  height: 14px;
+  border-radius: 7px;
+  background: linear-gradient(90deg, #0f1115 0 70%, #d7d7dc 70% 100%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  position: relative;
+}
+.feed-status-battery::after {
+  content: "";
+  position: absolute;
+  right: -2px;
+  top: 50%;
+  width: 2px;
+  height: 5px;
+  border-radius: 0 2px 2px 0;
+  background: #d7d7dc;
+  transform: translateY(-50%);
+}
+.feed-status-battery-value {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: #ffffff;
+  line-height: 1;
 }
 
 /* Feed post */
@@ -1022,23 +1084,24 @@ html, body {
 .feed-post-header {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 7px 10px 5px;
+  gap: 6px;
+  padding: 6px 12px 4px;
 }
 .feed-post-avatar {
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   flex-shrink: 0;
 }
 .feed-post-username {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   color: #262626;
   flex: 1;
+  letter-spacing: -0.02em;
 }
 .feed-post-more {
-  font-size: 14px;
+  font-size: 12px;
   color: #8e8e8e;
   cursor: pointer;
   padding: 0 2px;
@@ -1050,42 +1113,54 @@ html, body {
 .feed-post-actions {
   display: flex;
   align-items: center;
-  padding: 5px 9px 3px;
+  padding: 7px 9px 5px;
   gap: 10px;
 }
 .feed-post-likes {
-  padding: 2px 9px 2px;
-  font-size: 10px;
+  padding: 1px 9px 2px;
+  font-size: 9px;
   font-weight: 700;
   color: #262626;
+  letter-spacing: -0.02em;
 }
 .feed-post-caption {
-  padding: 1px 9px 8px;
-  font-size: 10px;
+  padding: 1px 9px 7px;
+  font-size: 9px;
   color: #262626;
   line-height: 1.35;
+  letter-spacing: -0.015em;
 }
 
 /* Feed ad (sponsored) */
 .feed-ad-header {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 7px 10px 5px;
+  gap: 6px;
+  padding: 6px 12px 6px;
   background: #fff;
+}
+.feed-ad-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #e0e0e0;
+  overflow: hidden;
+  flex-shrink: 0;
 }
 .feed-ad-name-block {
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-width: 0;
 }
 .feed-ad-username {
-  font-size: 11px;
+  font-size: 9.5px;
   font-weight: 700;
   color: #262626;
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
+  letter-spacing: -0.025em;
 }
 .feed-ad-verified {
   width: 12px;
@@ -1097,8 +1172,28 @@ html, body {
   mask: url("/images/ui_verified.svg") center / contain no-repeat;
 }
 .feed-ad-sponsored {
-  font-size: 10px;
+  font-size: 8px;
   color: #8e8e8e;
+  letter-spacing: -0.015em;
+  line-height: 1.1;
+}
+.feed-ad-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  margin-left: 16px;
+}
+.feed-ad-follow-btn {
+  border: none;
+  background: #f2f4f7;
+  color: #1c1c1e;
+  border-radius: 10px;
+  padding: 6px 11px;
+  font-size: 8.5px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
 }
 .feed-ad-media {
   width: 100%;
@@ -1109,16 +1204,35 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 10px;
-  font-size: 11px;
+  padding: 8px 12px;
+  font-size: 9px;
   font-weight: 700;
   cursor: pointer;
 }
+.feed-ad-actions {
+  display: flex;
+  align-items: center;
+  padding: 7px 9px 5px;
+  gap: 10px;
+}
+.feed-ad-action-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #262626;
+}
+.feed-ad-action-count {
+  font-size: 8.5px;
+  font-weight: 600;
+  color: #262626;
+  letter-spacing: -0.02em;
+}
 .feed-ad-caption {
   padding: 2px 9px 8px;
-  font-size: 10px;
+  font-size: 9px;
   color: #262626;
   line-height: 1.35;
+  letter-spacing: -0.015em;
 }
 
 /* Feed bottom nav */
@@ -1129,8 +1243,8 @@ html, body {
   border-top: 1px solid #efefef;
   display: flex;
   align-items: center;
-  justify-content: space-around;
-  padding: 6px 0 10px;
+  justify-content: space-between;
+  padding: 7px 18px 10px;
   z-index: 5;
 }
 

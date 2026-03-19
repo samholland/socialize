@@ -33,8 +33,8 @@ export function StoryFeedScroll({
   clientAvatarUrl,
   media,
 }: StoryFeedScrollProps) {
-  const WRAPPER_W = 300;
-  const WRAPPER_H = Math.round(300 * (2969 / 1842)); // ≈ 484
+  const WRAPPER_W = 340;
+  const WRAPPER_H = Math.round(WRAPPER_W * (2969 / 1842));
 
   const [storyIdx, setStoryIdx] = useState(AD_INDEX);
 

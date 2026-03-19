@@ -21,8 +21,8 @@ export function ReelsFeedScroll({
   clientAvatarUrl,
   media,
 }: ReelsFeedScrollProps) {
-  const WRAPPER_W = 300;
-  const WRAPPER_H = Math.round(300 * (2969 / 1842)); // ≈ 484
+  const WRAPPER_W = 340;
+  const WRAPPER_H = Math.round(WRAPPER_W * (2969 / 1842));
 
   const hasMedia = media.kind === "image" || media.kind === "video";
   const handle = "@" + clientName.toLowerCase().replace(/\s+/g, "");

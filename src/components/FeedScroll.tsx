@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { PreviewMedia } from "./PreviewCanvas";
 
 export type FeedScrollProps = {
@@ -25,7 +25,6 @@ const FAKE_POSTS: {
   caption: string;
   gradFrom: string;
   gradTo: string;
-  aspectRatio: string;
 }[] = [
   {
     username: "studio.lens",
@@ -34,7 +33,6 @@ const FAKE_POSTS: {
     caption: "Golden hour never disappoints. 🌅 #photography #goldenhour",
     gradFrom: "#f0c27f",
     gradTo: "#c97c3a",
-    aspectRatio: "1/1",
   },
   {
     username: "minimal.arch",
@@ -43,7 +41,6 @@ const FAKE_POSTS: {
     caption: "Lines and light. ✨ #architecture #minimal",
     gradFrom: "#c5d8e8",
     gradTo: "#7ba8c0",
-    aspectRatio: "3/4",
   },
   {
     username: "nomad.routes",
@@ -52,7 +49,6 @@ const FAKE_POSTS: {
     caption: "New city every week. 🗺️ #travel #explore",
     gradFrom: "#88c988",
     gradTo: "#4a7a49",
-    aspectRatio: "1/1",
   },
   {
     username: "still.frames",
@@ -61,7 +57,6 @@ const FAKE_POSTS: {
     caption: "Details make the difference. 🎞 #film #analog",
     gradFrom: "#dbbfd4",
     gradTo: "#c490b8",
-    aspectRatio: "1/1",
   },
 ];
 
@@ -87,7 +82,68 @@ function MoreSvg() {
   );
 }
 
-function FakePost({ post }: { post: typeof FAKE_POSTS[0] }) {
+function WifiSvg() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 12.55a11 11 0 0 1 14.08 0" />
+      <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+      <path d="M12 20h.01" />
+      <path d="M2 8.82a16 16 0 0 1 20 0" />
+    </svg>
+  );
+}
+
+function FeedStatusBar() {
+  const formatTime = useMemo(
+    () => (date: Date) => {
+      const parts = new Intl.DateTimeFormat("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      }).formatToParts(date);
+      const hour = parts.find((part) => part.type === "hour")?.value ?? "";
+      const minute = parts.find((part) => part.type === "minute")?.value ?? "";
+      return `${hour}:${minute}`;
+    },
+    []
+  );
+  const [timeLabel, setTimeLabel] = useState(() => formatTime(new Date()));
+
+  useEffect(() => {
+    const tick = () => setTimeLabel(formatTime(new Date()));
+    const intervalId = window.setInterval(tick, 30000);
+    tick();
+    return () => window.clearInterval(intervalId);
+  }, [formatTime]);
+
+  return (
+    <div className="feed-status-bar">
+      <div className="feed-status-time">{timeLabel}</div>
+      <div className="feed-status-right">
+        <div className="feed-status-signal" aria-hidden="true">
+          <span className="feed-status-signal-bar" />
+          <span className="feed-status-signal-bar" />
+          <span className="feed-status-signal-bar" />
+          <span className="feed-status-signal-bar is-muted" />
+        </div>
+        <span className="feed-status-wifi" aria-hidden="true">
+          <WifiSvg />
+        </span>
+        <div className="feed-status-battery" aria-hidden="true">
+          <span className="feed-status-battery-value">65</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FakePost({
+  post,
+  aspectRatio,
+}: {
+  post: typeof FAKE_POSTS[0];
+  aspectRatio: string;
+}) {
   return (
     <div className="feed-post">
       <div className="feed-post-header">
@@ -102,7 +158,7 @@ function FakePost({ post }: { post: typeof FAKE_POSTS[0] }) {
         className="feed-post-image"
         style={{
           background: `linear-gradient(135deg, ${post.gradFrom}, ${post.gradTo})`,
-          aspectRatio: post.aspectRatio,
+          aspectRatio,
         }}
       />
       <div className="feed-post-actions">
@@ -133,6 +189,8 @@ export function FeedScroll({
   media,
 
 }: FeedScrollProps) {
+  const WRAPPER_W = 340;
+  const WRAPPER_H = Math.round(WRAPPER_W * (2969 / 1842));
   const screenRef = useRef<HTMLDivElement>(null);
   const adRef = useRef<HTMLDivElement>(null);
 
@@ -154,13 +212,18 @@ export function FeedScroll({
   const adAspect = isStory ? "9/16" : mediaAspect === "3:4" ? "3/4" : "1/1";
 
   const trimmedName = (clientName || "Brand").slice(0, 20);
+  const sampleMetrics = {
+    likes: "1,033",
+    comments: "11",
+    shares: "274",
+  };
 
   return (
     <div
       className="feed-wrapper"
       style={{
-        width: 300,
-        height: Math.round(300 * (2969 / 1842)),
+        width: WRAPPER_W,
+        height: WRAPPER_H,
       }}
     >
       {/* iPhone frame */}
@@ -177,17 +240,11 @@ export function FeedScroll({
         className="feed-screen"
         ref={screenRef}
       >
-        {/* IG top bar */}
-        <div className="feed-top-bar">
-          <span className="feed-top-logo">Instagram</span>
-          <div style={{ display: "flex", gap: 10 }}>
-            <IgIcon src="/images/ig_send.svg" size={20} />
-          </div>
-        </div>
+        <FeedStatusBar />
 
         {/* Fake posts above */}
-        <FakePost post={FAKE_POSTS[0]} />
-        <FakePost post={FAKE_POSTS[1]} />
+        <FakePost post={FAKE_POSTS[0]} aspectRatio={adAspect} />
+        <FakePost post={FAKE_POSTS[1]} aspectRatio={adAspect} />
 
         {/* THE AD */}
         <div
@@ -197,16 +254,7 @@ export function FeedScroll({
         >
           {/* Ad header */}
           <div className="feed-ad-header">
-            <div
-              style={{
-                width: 26,
-                height: 26,
-                borderRadius: "50%",
-                background: "#e0e0e0",
-                overflow: "hidden",
-                flexShrink: 0,
-              }}
-            >
+            <div className="feed-ad-avatar">
               {clientAvatarUrl && (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -221,9 +269,14 @@ export function FeedScroll({
                 {trimmedName}
                 {clientVerified && <span className="feed-ad-verified" />}
               </span>
-              <span className="feed-ad-sponsored">Sponsored</span>
+              <span className="feed-ad-sponsored">Ad</span>
             </div>
-            <MoreSvg />
+            <div className="feed-ad-header-actions">
+              <button type="button" className="feed-ad-follow-btn">
+                Follow
+              </button>
+              <span className="feed-post-more"><MoreSvg /></span>
+            </div>
           </div>
 
           {/* Media */}
@@ -247,7 +300,7 @@ export function FeedScroll({
               />
             )}
             {media.kind === "none" && (
-              <div
+                <div
                 style={{
                   width: "100%",
                   height: "100%",
@@ -256,7 +309,7 @@ export function FeedScroll({
                   alignItems: "center",
                   justifyContent: "center",
                   color: "rgba(255,255,255,0.3)",
-                  fontSize: 10,
+                  fontSize: 9,
                 }}
               >
                 Drop media to preview
@@ -274,12 +327,21 @@ export function FeedScroll({
           </div>
 
           {/* Actions */}
-          <div className="feed-post-actions">
-            <IgIcon src="/images/ig_heart.svg" size={20} />
-            <IgIcon src="/images/ig_comment.svg" size={20} />
-            <IgIcon src="/images/ig_send.svg" size={20} />
+          <div className="feed-ad-actions">
+            <div className="feed-ad-action-item">
+              <IgIcon src="/images/ig_heart.svg" size={18} />
+              <span className="feed-ad-action-count">{sampleMetrics.likes}</span>
+            </div>
+            <div className="feed-ad-action-item">
+              <IgIcon src="/images/ig_comment.svg" size={18} />
+              <span className="feed-ad-action-count">{sampleMetrics.comments}</span>
+            </div>
+            <div className="feed-ad-action-item">
+              <IgIcon src="/images/ig_send.svg" size={18} />
+              <span className="feed-ad-action-count">{sampleMetrics.shares}</span>
+            </div>
             <div style={{ flex: 1 }} />
-            <IgIcon src="/images/ig_bookmark.svg" size={20} />
+            <IgIcon src="/images/ig_bookmark.svg" size={18} />
           </div>
 
           {/* Caption */}
@@ -294,16 +356,16 @@ export function FeedScroll({
         </div>
 
         {/* Fake posts below */}
-        <FakePost post={FAKE_POSTS[2]} />
-        <FakePost post={FAKE_POSTS[3]} />
+        <FakePost post={FAKE_POSTS[2]} aspectRatio={adAspect} />
+        <FakePost post={FAKE_POSTS[3]} aspectRatio={adAspect} />
 
         {/* Bottom nav */}
         <div className="feed-bottom-nav">
           <IgIcon src="/images/ig_home.svg" size={22} />
-          <IgIcon src="/images/ig_search.svg" size={22} muted />
-          <IgIcon src="/images/ig_newpost.svg" size={22} muted />
-          <IgIcon src="/images/ig_reels.svg" size={22} muted />
-          <IgIcon src="/images/ig_pfp_blank.svg" size={22} muted />
+          <IgIcon src="/images/ig_reels.svg" size={22} />
+          <IgIcon src="/images/ig_send.svg" size={22} />
+          <IgIcon src="/images/ig_search.svg" size={22} />
+          <IgIcon src="/images/ig_pfp_blank.svg" size={22} />
         </div>
       </div>
     </div>

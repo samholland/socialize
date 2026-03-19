@@ -699,6 +699,7 @@ export default function Home() {
 
   // Canvas ref for export
   const canvasRef = useRef<PreviewCanvasHandle>(null);
+  const mediaInputRef = useRef<HTMLInputElement>(null);
 
   // Preview body ref for auto-zoom
   const previewBodyRef = useRef<HTMLDivElement>(null);
@@ -757,8 +758,8 @@ export default function Home() {
   useEffect(() => {
     const el = previewBodyRef.current;
     if (!el) return;
-    const CONTENT_W = 300;
-    const CONTENT_H = Math.round(300 * (2969 / 1842)); // ≈ 484, same for frame and feed
+    const CONTENT_W = 340;
+    const CONTENT_H = Math.round(340 * (2969 / 1842));
     const compute = () => {
       const { width, height } = el.getBoundingClientRect();
       if (!width || !height) return;
@@ -829,6 +830,47 @@ export default function Home() {
       }
       return next;
     });
+  }
+
+  function setMediaFromFile(campaignId: string, file: File) {
+    const url = URL.createObjectURL(file);
+
+    if (file.type.startsWith("image/")) {
+      setCampaignMedia(campaignId, { kind: "image", url });
+      return;
+    }
+
+    if (file.type.startsWith("video/")) {
+      setCampaignMedia(campaignId, { kind: "video", url });
+      return;
+    }
+
+    URL.revokeObjectURL(url);
+    alert("Please choose an image or video file.");
+  }
+
+  function pickPreviewMedia() {
+    mediaInputRef.current?.click();
+  }
+
+  function onPreviewFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file && selectedCampaign) {
+      setMediaFromFile(selectedCampaign.id, file);
+    }
+    e.target.value = "";
+  }
+
+  function onPreviewDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (file && selectedCampaign) {
+      setMediaFromFile(selectedCampaign.id, file);
+    }
+  }
+
+  function onPreviewDragOver(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
   }
 
   // ── Workspace management ───────────────────────────────────────
@@ -2394,6 +2436,24 @@ export default function Home() {
       <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
         {/* Toolbar */}
         <div className="preview-toolbar">
+          <input
+            ref={mediaInputRef}
+            type="file"
+            accept="image/*,video/*"
+            onChange={onPreviewFilePicked}
+            style={{ display: "none" }}
+          />
+          <button className="btn btn-secondary btn-sm" onClick={pickPreviewMedia}>
+            <IconUpload /> Upload media
+          </button>
+          {selectedMedia.kind !== "none" && (
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => setCampaignMedia(campaign.id, EMPTY_MEDIA)}
+            >
+              Remove media
+            </button>
+          )}
           <div className="zoom-controls">
             <button
               className="zoom-btn"
@@ -2412,7 +2472,12 @@ export default function Home() {
         </div>
 
         {/* Preview body — ref used for auto-zoom */}
-        <div className="preview-body" ref={previewBodyRef}>
+        <div
+          className="preview-body"
+          ref={previewBodyRef}
+          onDrop={onPreviewDrop}
+          onDragOver={onPreviewDragOver}
+        >
           {/* Feed view — routed by platform */}
           <div
             className="preview-scaled"
