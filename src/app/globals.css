@@ -1491,12 +1491,35 @@ html, body {
   overflow: hidden;
 }
 
+.story-chrome {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+}
+
 .story-progress-bars {
   display: flex;
   gap: 3px;
-  padding: 22px 8px 4px;
+  padding: 30px 8px 4px;
   position: relative;
-  z-index: 2;
+  pointer-events: none;
+}
+
+.story-tap-zones {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  pointer-events: none;
+}
+
+.story-tap-zone {
+  flex: 1;
+  height: 100%;
+  cursor: pointer;
+  pointer-events: all;
 }
 
 .story-bar {
@@ -1533,7 +1556,8 @@ html, body {
   gap: 8px;
   padding: 4px 10px 8px;
   position: relative;
-  z-index: 2;
+  z-index: 4;
+  pointer-events: all;
 }
 
 .story-avatar-wrap {
