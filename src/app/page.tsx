@@ -14,6 +14,7 @@ import {
   type PreviewMedia,
   type PreviewCanvasHandle,
 } from "@/components/PreviewCanvas";
+import { exportInstagramStoryVideoWebm } from "@/export/story/exportImageStoryVideo";
 import { FeedScroll } from "@/components/FeedScroll";
 import { StoryFeedScroll } from "@/components/StoryFeedScroll";
 import { FacebookFeedScroll } from "@/components/FacebookFeedScroll";
@@ -1525,6 +1526,35 @@ export default function Home() {
     }
   }
 
+  async function exportStoryVideoWebm(
+    campaign: Campaign,
+    client: Client,
+    media: PreviewMedia
+  ): Promise<Blob | null> {
+    if (campaign.platform !== "Instagram Story") return null;
+    if (media.kind !== "video") {
+      alert("Story WebM export is available when the ad media is a video.");
+      return null;
+    }
+
+    try {
+      return await exportInstagramStoryVideoWebm({
+        clientName: client.name,
+        clientAvatarUrl: client.profileImageDataUrl,
+        primaryText: campaign.primaryText,
+        cta: campaign.cta,
+        ctaVisible: campaign.ctaVisible,
+        ctaBgColor: campaign.ctaBgColor,
+        ctaTextColor: campaign.ctaTextColor,
+        media,
+      });
+    } catch (error) {
+      console.warn("Story video export failed.", error);
+      alert("Unable to export Story video on this browser.");
+      return null;
+    }
+  }
+
   async function buildCampaignZip(
     client: Client,
     project: Project,
@@ -2872,7 +2902,6 @@ export default function Home() {
   function renderExportPanel() {
     if (!exportPanelOpen) return null;
 
-    const hasMedia = selectedMedia.kind !== "none";
     const isImage = selectedMedia.kind === "image";
     const isVideo = selectedMedia.kind === "video";
 
@@ -2933,6 +2962,29 @@ export default function Home() {
                   <div className="export-option-desc">iPhone mockup with your ad</div>
                 </div>
               </button>
+
+              {selectedCampaign.platform === "Instagram Story" && isVideo && (
+                <button
+                  className="export-option"
+                  onClick={async () => {
+                    close();
+                    const blob = await exportStoryVideoWebm(
+                      selectedCampaign,
+                      selectedClient,
+                      selectedMedia
+                    );
+                    if (blob) {
+                      triggerDownload(blob, `${slugify(selectedCampaign.name)}_story.webm`);
+                    }
+                  }}
+                >
+                  <div className="export-option-icon">🎞️</div>
+                  <div className="export-option-text">
+                    <div className="export-option-label">Export Story video (.webm)</div>
+                    <div className="export-option-desc">Composited Story mockup from uploaded video media</div>
+                  </div>
+                </button>
+              )}
 
               {isImage && (
                 <button
