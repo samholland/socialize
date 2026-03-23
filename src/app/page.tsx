@@ -14,12 +14,9 @@ import {
   type PreviewMedia,
   type PreviewCanvasHandle,
 } from "@/components/PreviewCanvas";
-import { exportInstagramStoryVideoWebm } from "@/export/story/exportImageStoryVideo";
-import { FeedScroll } from "@/components/FeedScroll";
-import { StoryFeedScroll } from "@/components/StoryFeedScroll";
-import { FacebookFeedScroll } from "@/components/FacebookFeedScroll";
-import { TikTokFeedScroll } from "@/components/TikTokFeedScroll";
-import { ReelsFeedScroll } from "@/components/ReelsFeedScroll";
+import {
+  exportInstagramStoryVideoWebm,
+} from "@/export/story/exportImageStoryVideo";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -387,18 +384,69 @@ function loadWorkspaceData(wsId: string): { data: AppData; selection: Selection;
   }
 }
 
-function loadUiPrefs(): { panelWidths: [number, number]; darkMode: boolean } {
-  if (typeof window === "undefined") return { panelWidths: [260, 420], darkMode: false };
+type UiPrefs = {
+  panelWidths: [number, number];
+  darkMode: boolean;
+  showIgFeedOverlay: boolean;
+  igFeedOverlayOpacity: number;
+  igFeedOverlayScale: number;
+  igFeedOverlayOffsetX: number;
+  igFeedOverlayOffsetY: number;
+};
+
+function loadUiPrefs(): UiPrefs {
+  const fallback: UiPrefs = {
+    panelWidths: [260, 420],
+    darkMode: false,
+    showIgFeedOverlay: false,
+    igFeedOverlayOpacity: 0.4,
+    igFeedOverlayScale: 1,
+    igFeedOverlayOffsetX: 0,
+    igFeedOverlayOffsetY: 0,
+  };
+  if (typeof window === "undefined") return fallback;
   try {
     const raw = localStorage.getItem(UI_KEY);
-    if (!raw) return { panelWidths: [260, 420], darkMode: false };
-    const parsed = JSON.parse(raw) as { panelWidths?: [number, number]; darkMode?: boolean };
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as {
+      panelWidths?: [number, number];
+      darkMode?: boolean;
+      showIgFeedOverlay?: boolean;
+      igFeedOverlayOpacity?: number;
+      igFeedOverlayScale?: number;
+      igFeedOverlayOffsetX?: number;
+      igFeedOverlayOffsetY?: number;
+    };
+    const opacity =
+      typeof parsed.igFeedOverlayOpacity === "number"
+        ? Math.max(0, Math.min(1, parsed.igFeedOverlayOpacity))
+        : fallback.igFeedOverlayOpacity;
+    const scale =
+      typeof parsed.igFeedOverlayScale === "number"
+        ? Math.max(0.4, Math.min(2.5, parsed.igFeedOverlayScale))
+        : fallback.igFeedOverlayScale;
+    const offsetX =
+      typeof parsed.igFeedOverlayOffsetX === "number"
+        ? Math.max(-220, Math.min(220, parsed.igFeedOverlayOffsetX))
+        : fallback.igFeedOverlayOffsetX;
+    const offsetY =
+      typeof parsed.igFeedOverlayOffsetY === "number"
+        ? Math.max(-360, Math.min(360, parsed.igFeedOverlayOffsetY))
+        : fallback.igFeedOverlayOffsetY;
     return {
       panelWidths: Array.isArray(parsed.panelWidths) ? parsed.panelWidths : [260, 420],
       darkMode: typeof parsed.darkMode === "boolean" ? parsed.darkMode : false,
+      showIgFeedOverlay:
+        typeof parsed.showIgFeedOverlay === "boolean"
+          ? parsed.showIgFeedOverlay
+          : fallback.showIgFeedOverlay,
+      igFeedOverlayOpacity: opacity,
+      igFeedOverlayScale: scale,
+      igFeedOverlayOffsetX: offsetX,
+      igFeedOverlayOffsetY: offsetY,
     };
   } catch {
-    return { panelWidths: [260, 420], darkMode: false };
+    return fallback;
   }
 }
 
@@ -676,6 +724,11 @@ export default function Home() {
     setSelectionLevel(wsData.level);
     setPanelWidths(ui.panelWidths);
     setDarkMode(ui.darkMode);
+    setShowIgFeedOverlay(ui.showIgFeedOverlay);
+    setIgFeedOverlayOpacity(ui.igFeedOverlayOpacity);
+    setIgFeedOverlayScale(ui.igFeedOverlayScale);
+    setIgFeedOverlayOffsetX(ui.igFeedOverlayOffsetX);
+    setIgFeedOverlayOffsetY(ui.igFeedOverlayOffsetY);
     setStorageReady(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -688,6 +741,11 @@ export default function Home() {
 
   // Preview
   const [zoom, setZoom] = useState(1);
+  const [showIgFeedOverlay, setShowIgFeedOverlay] = useState(false);
+  const [igFeedOverlayOpacity, setIgFeedOverlayOpacity] = useState(0.4);
+  const [igFeedOverlayScale, setIgFeedOverlayScale] = useState(1);
+  const [igFeedOverlayOffsetX, setIgFeedOverlayOffsetX] = useState(0);
+  const [igFeedOverlayOffsetY, setIgFeedOverlayOffsetY] = useState(0);
 
   // Sidebar search
   const [sidebarSearch, setSidebarSearch] = useState("");
@@ -744,9 +802,26 @@ export default function Home() {
     if (!storageReady) return;
     localStorage.setItem(
       UI_KEY,
-      JSON.stringify({ panelWidths, darkMode })
+      JSON.stringify({
+        panelWidths,
+        darkMode,
+        showIgFeedOverlay,
+        igFeedOverlayOpacity,
+        igFeedOverlayScale,
+        igFeedOverlayOffsetX,
+        igFeedOverlayOffsetY,
+      })
     );
-  }, [storageReady, panelWidths, darkMode]);
+  }, [
+    storageReady,
+    panelWidths,
+    darkMode,
+    showIgFeedOverlay,
+    igFeedOverlayOpacity,
+    igFeedOverlayScale,
+    igFeedOverlayOffsetX,
+    igFeedOverlayOffsetY,
+  ]);
 
   useEffect(() => {
     campaignMediaRef.current = campaignMedia;
@@ -1494,8 +1569,9 @@ export default function Home() {
   async function exportFramePng(): Promise<Blob | null> {
     const node = previewExportRef.current;
     try {
-      if (selectedCampaign?.platform === "Instagram Story") {
-        return await canvasRef.current?.exportCanvas() ?? null;
+      const canvasBlob = await canvasRef.current?.exportCanvas();
+      if (canvasBlob) {
+        return canvasBlob;
       }
       if (!node) {
         return await canvasRef.current?.exportCanvas() ?? null;
@@ -1509,9 +1585,9 @@ export default function Home() {
         }
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
-        let canvas = await capturePreviewCanvas(node, true);
+        let canvas = await capturePreviewCanvas(node, false);
         if (!canvasHasVisiblePixels(canvas)) {
-          canvas = await capturePreviewCanvas(node, false);
+          canvas = await capturePreviewCanvas(node, true);
         }
         return await new Promise<Blob | null>((resolve) =>
           canvas.toBlob((blob) => resolve(blob), "image/png", 1)
@@ -2668,6 +2744,8 @@ export default function Home() {
 
     const campaign = selectedCampaign;
     const client = selectedClient;
+    const isInstagramOverlayCampaign =
+      campaign.platform === "Instagram Feed" || campaign.platform === "Instagram Reels";
 
     return (
       <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -2690,6 +2768,118 @@ export default function Home() {
             >
               Remove media
             </button>
+          )}
+          {isInstagramOverlayCampaign && (
+            <button
+              className={`btn btn-sm ${showIgFeedOverlay ? "btn-primary" : "btn-secondary"}`}
+              onClick={() => setShowIgFeedOverlay((enabled) => !enabled)}
+              title={
+                campaign.platform === "Instagram Reels"
+                  ? "Overlay public/images/testing/overlay-reels.png"
+                  : "Overlay public/images/testing/overlay1.png"
+              }
+            >
+              Overlay {showIgFeedOverlay ? "On" : "Off"}
+            </button>
+          )}
+          {isInstagramOverlayCampaign && showIgFeedOverlay && (
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 10,
+                fontSize: 12,
+                color: "var(--ink-2)",
+              }}
+            >
+              <label title="Overlay opacity" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                Opacity
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={Math.round(igFeedOverlayOpacity * 100)}
+                  onChange={(e) =>
+                    setIgFeedOverlayOpacity(
+                      Math.max(0, Math.min(1, Number(e.target.value) / 100))
+                    )
+                  }
+                  style={{ width: 88 }}
+                />
+                <span style={{ minWidth: 36, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                  {Math.round(igFeedOverlayOpacity * 100)}%
+                </span>
+              </label>
+              <label title="Overlay scale" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                Scale
+                <input
+                  type="range"
+                  min={0.4}
+                  max={2.5}
+                  step={0.01}
+                  value={igFeedOverlayScale}
+                  onChange={(e) =>
+                    setIgFeedOverlayScale(
+                      Math.max(0.4, Math.min(2.5, Number(e.target.value)))
+                    )
+                  }
+                  style={{ width: 88 }}
+                />
+                <span style={{ minWidth: 36, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                  {igFeedOverlayScale.toFixed(2)}x
+                </span>
+              </label>
+              <label title="Overlay X offset" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                X
+                <input
+                  type="range"
+                  min={-220}
+                  max={220}
+                  step={1}
+                  value={igFeedOverlayOffsetX}
+                  onChange={(e) =>
+                    setIgFeedOverlayOffsetX(
+                      Math.max(-220, Math.min(220, Number(e.target.value)))
+                    )
+                  }
+                  style={{ width: 88 }}
+                />
+                <span style={{ minWidth: 30, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                  {igFeedOverlayOffsetX}
+                </span>
+              </label>
+              <label title="Overlay Y offset" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                Y
+                <input
+                  type="range"
+                  min={-360}
+                  max={360}
+                  step={1}
+                  value={igFeedOverlayOffsetY}
+                  onChange={(e) =>
+                    setIgFeedOverlayOffsetY(
+                      Math.max(-360, Math.min(360, Number(e.target.value)))
+                    )
+                  }
+                  style={{ width: 88 }}
+                />
+                <span style={{ minWidth: 30, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                  {igFeedOverlayOffsetY}
+                </span>
+              </label>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  setIgFeedOverlayOpacity(0.4);
+                  setIgFeedOverlayScale(1);
+                  setIgFeedOverlayOffsetX(0);
+                  setIgFeedOverlayOffsetY(0);
+                }}
+              >
+                Reset Overlay
+              </button>
+            </div>
           )}
           <div className="zoom-controls">
             <button
@@ -2716,15 +2906,16 @@ export default function Home() {
           onDragOver={onPreviewDragOver}
         >
           {/* Feed view — routed by platform */}
-          <div
-            className="preview-scaled"
-            style={{ transform: `scale(${zoom * ZOOM_BASE})` }}
-          >
-            <div ref={previewExportRef} className="preview-export-surface">
-              {campaign.platform === "Instagram Feed" && (
-                <FeedScroll
+            <div
+              className="preview-scaled"
+              style={{ transform: `scale(${zoom * ZOOM_BASE})` }}
+            >
+              <div ref={previewExportRef} className="preview-export-surface">
+                <PreviewCanvas
+                  ref={canvasRef}
                   primaryText={campaign.primaryText}
                   cta={campaign.cta}
+                  ctaVisible={campaign.ctaVisible}
                   ctaBgColor={campaign.ctaBgColor}
                   ctaTextColor={campaign.ctaTextColor}
                   platform={campaign.platform}
@@ -2733,73 +2924,15 @@ export default function Home() {
                   clientVerified={client.isVerified}
                   clientAvatarUrl={client.profileImageDataUrl}
                   media={selectedMedia}
+                  instagramFeedOverlayEnabled={isInstagramOverlayCampaign && showIgFeedOverlay}
+                  instagramFeedOverlayOpacity={igFeedOverlayOpacity}
+                  instagramFeedOverlayScale={igFeedOverlayScale}
+                  instagramFeedOverlayOffsetX={igFeedOverlayOffsetX}
+                  instagramFeedOverlayOffsetY={igFeedOverlayOffsetY}
+                  onMediaChange={(m) => setCampaignMedia(campaign.id, m)}
                 />
-              )}
-              {campaign.platform === "Instagram Story" && (
-                <StoryFeedScroll
-                  primaryText={campaign.primaryText}
-                  cta={campaign.cta}
-                  ctaVisible={campaign.ctaVisible}
-                  ctaBgColor={campaign.ctaBgColor}
-                  ctaTextColor={campaign.ctaTextColor}
-                  clientName={client.name}
-                  clientAvatarUrl={client.profileImageDataUrl}
-                  media={selectedMedia}
-                />
-              )}
-              {campaign.platform === "Facebook Feed" && (
-                <FacebookFeedScroll
-                  primaryText={campaign.primaryText}
-                  cta={campaign.cta}
-                  ctaBgColor={campaign.ctaBgColor}
-                  ctaTextColor={campaign.ctaTextColor}
-                  mediaAspect={campaign.mediaAspect}
-                  clientName={client.name}
-                  clientAvatarUrl={client.profileImageDataUrl}
-                  media={selectedMedia}
-                />
-              )}
-              {campaign.platform === "TikTok" && (
-                <TikTokFeedScroll
-                  primaryText={campaign.primaryText}
-                  cta={campaign.cta}
-                  ctaBgColor={campaign.ctaBgColor}
-                  ctaTextColor={campaign.ctaTextColor}
-                  clientName={client.name}
-                  clientAvatarUrl={client.profileImageDataUrl}
-                  media={selectedMedia}
-                />
-              )}
-              {campaign.platform === "Instagram Reels" && (
-                <ReelsFeedScroll
-                  primaryText={campaign.primaryText}
-                  cta={campaign.cta}
-                  ctaBgColor={campaign.ctaBgColor}
-                  ctaTextColor={campaign.ctaTextColor}
-                  clientName={client.name}
-                  clientAvatarUrl={client.profileImageDataUrl}
-                  media={selectedMedia}
-                />
-              )}
+              </div>
             </div>
-          </div>
-          <div style={{ display: "none" }}>
-            <PreviewCanvas
-              ref={canvasRef}
-              primaryText={campaign.primaryText}
-              cta={campaign.cta}
-              ctaVisible={campaign.ctaVisible}
-              ctaBgColor={campaign.ctaBgColor}
-              ctaTextColor={campaign.ctaTextColor}
-              platform={campaign.platform}
-              mediaAspect={campaign.mediaAspect}
-              clientName={client.name}
-              clientVerified={client.isVerified}
-              clientAvatarUrl={client.profileImageDataUrl}
-              media={selectedMedia}
-              onMediaChange={(m) => setCampaignMedia(campaign.id, m)}
-            />
-          </div>
         </div>
       </div>
     );

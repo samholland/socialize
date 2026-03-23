@@ -1,18 +1,15 @@
 import {
   FONT_STACK,
-  FRAME_NATIVE,
   STORY_LAYOUT,
-  STORY_VIDEO_EXPORT,
-  SCREEN_NATIVE,
 } from "./constants";
+import type { StorySceneModel } from "./sceneModel";
 import type {
   StoryExportAssets,
-  StoryExportScene,
   StoryFrameMediaSource,
 } from "./types";
 
 type Rect = { x: number; y: number; w: number; h: number };
-type Layout = { frame: Rect; screen: Rect; screenRadius: number };
+type Layout = { frame: Rect; screen: Rect; screenRadius: number; scale: number };
 
 function roundedRectPath(
   ctx: CanvasRenderingContext2D,
@@ -179,23 +176,25 @@ function drawAvatar(
   ctx.stroke();
 }
 
-function computeLayout(): Layout {
+function computeLayout(scene: StorySceneModel): Layout {
+  const { frameNative, screenNative } = scene.geometry;
+  const { width: outputW, height: outputH } = scene.coordinateSpace;
   const frameW = 860;
-  const frameH = Math.round((frameW * FRAME_NATIVE.h) / FRAME_NATIVE.w);
+  const frameH = Math.round((frameW * frameNative.h) / frameNative.w);
   const frame = {
-    x: (STORY_VIDEO_EXPORT.width - frameW) / 2,
-    y: (STORY_VIDEO_EXPORT.height - frameH) / 2,
+    x: (outputW - frameW) / 2,
+    y: (outputH - frameH) / 2,
     w: frameW,
     h: frameH,
   };
   const screen = {
-    x: frame.x + frame.w * (SCREEN_NATIVE.x / FRAME_NATIVE.w),
-    y: frame.y + frame.h * (SCREEN_NATIVE.y / FRAME_NATIVE.h),
-    w: frame.w * (SCREEN_NATIVE.w / FRAME_NATIVE.w),
-    h: frame.h * (SCREEN_NATIVE.h / FRAME_NATIVE.h),
+    x: frame.x + frame.w * (screenNative.x / frameNative.w),
+    y: frame.y + frame.h * (screenNative.y / frameNative.h),
+    w: frame.w * (screenNative.w / frameNative.w),
+    h: frame.h * (screenNative.h / frameNative.h),
   };
   const scale = screen.w / 364;
-  return { frame, screen, screenRadius: 42 * scale };
+  return { frame, screen, screenRadius: 42 * scale, scale };
 }
 
 function normalizeHexColor(value: string | undefined, fallback: string): string {
@@ -203,6 +202,103 @@ function normalizeHexColor(value: string | undefined, fallback: string): string 
   const trimmed = value.trim();
   if (/^#[0-9a-fA-F]{6}$/.test(trimmed)) return trimmed.toLowerCase();
   return fallback;
+}
+
+function alphaHex(hex: string, alpha: number): string {
+  const normalized = normalizeHexColor(hex, "#000000");
+  const safeAlpha = Math.max(0, Math.min(1, alpha));
+  const channel = Math.round(safeAlpha * 255)
+    .toString(16)
+    .padStart(2, "0");
+  return `${normalized}${channel}`;
+}
+
+function drawStoryStatusBar(
+  ctx: CanvasRenderingContext2D,
+  layout: Layout,
+  tone: "light" | "dark",
+  timeLabel = "12:13"
+) {
+  const s = layout.scale;
+  const fg = tone === "light" ? "#ffffff" : "#1f2430";
+  const muted = tone === "light" ? "rgba(255,255,255,0.35)" : alphaHex(fg, 0.28);
+  const timeX = layout.screen.x + 38 * s;
+  const timeY = layout.screen.y + 34 * s;
+  const batteryW = 28 * s;
+  const batteryH = 14 * s;
+  const batteryX = layout.screen.x + layout.screen.w - 58 * s;
+  const batteryY = layout.screen.y + 17 * s;
+  const capW = 2.5 * s;
+  const capH = 5 * s;
+  const signalRight = batteryX - 10 * s;
+  const signalBaseY = batteryY + batteryH - 1.5 * s;
+  const barW = 4 * s;
+  const barGap = 2.5 * s;
+  const barHeights = [7, 10, 13, 16].map((value) => value * s);
+
+  ctx.fillStyle = fg;
+  ctx.font = `600 ${16 * s}px ${FONT_STACK}`;
+  ctx.fillText(timeLabel, timeX, timeY);
+
+  barHeights.forEach((height, index) => {
+    const x =
+      signalRight - (barHeights.length - index) * barW - (barHeights.length - 1 - index) * barGap;
+    ctx.fillStyle = index === barHeights.length - 1 ? muted : fg;
+    fillRoundedRect(
+      ctx,
+      {
+        x,
+        y: signalBaseY - height,
+        w: barW,
+        h: height,
+      },
+      1.4 * s
+    );
+  });
+
+  ctx.strokeStyle = fg;
+  strokeRoundedRect(
+    ctx,
+    {
+      x: batteryX,
+      y: batteryY,
+      w: batteryW,
+      h: batteryH,
+    },
+    6 * s,
+    Math.max(1, 1.6 * s)
+  );
+
+  ctx.fillStyle = muted;
+  fillRoundedRect(
+    ctx,
+    {
+      x: batteryX + 2.5 * s,
+      y: batteryY + 2.5 * s,
+      w: batteryW - 7 * s,
+      h: batteryH - 5 * s,
+    },
+    3 * s
+  );
+
+  ctx.fillStyle = fg;
+  fillRoundedRect(
+    ctx,
+    {
+      x: batteryX + 2.5 * s,
+      y: batteryY + 2.5 * s,
+      w: batteryW - 7 * s,
+      h: batteryH - 5 * s,
+    },
+    3 * s
+  );
+
+  ctx.fillRect(
+    batteryX + batteryW + 1.8 * s,
+    batteryY + (batteryH - capH) / 2,
+    capW,
+    capH
+  );
 }
 
 function drawStoryCtaPill(
@@ -246,6 +342,24 @@ function drawStoryCtaPill(
   ctx.restore();
 }
 
+function drawStoryCtaBar(
+  ctx: CanvasRenderingContext2D,
+  layout: Layout,
+  rect: Rect,
+  ctaText: string,
+  bgColor: string,
+  textColor: string
+) {
+  const s = layout.scale;
+  ctx.fillStyle = normalizeHexColor(bgColor, "#4f94aa");
+  fillRoundedRect(ctx, rect, 0);
+
+  ctx.fillStyle = normalizeHexColor(textColor, "#ffffff");
+  ctx.font = `700 ${16 * s}px ${FONT_STACK}`;
+  ctx.fillText(fitText(ctaText || "Learn More", 16), rect.x + 12 * s, rect.y + rect.h * 0.68);
+  ctx.fillText(">", rect.x + rect.w - 21 * s, rect.y + rect.h * 0.74);
+}
+
 function drawFallbackActionIcon(ctx: CanvasRenderingContext2D, x: number, y: number, size: number) {
   ctx.strokeStyle = "#fff";
   ctx.lineWidth = Math.max(1, size * 0.09);
@@ -254,38 +368,77 @@ function drawFallbackActionIcon(ctx: CanvasRenderingContext2D, x: number, y: num
   ctx.stroke();
 }
 
-export function renderStoryExportFrame(
+function drawMoreIcon(
   ctx: CanvasRenderingContext2D,
-  scene: StoryExportScene,
+  x: number,
+  y: number,
+  radius: number,
+  color: string
+) {
+  ctx.fillStyle = color;
+  for (let i = 0; i < 3; i += 1) {
+    ctx.beginPath();
+    ctx.arc(x + i * radius * 2.3, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawStoryMedia(
+  ctx: CanvasRenderingContext2D,
+  mediaRect: Rect,
+  assets: StoryExportAssets,
+  mediaSource: StoryFrameMediaSource | undefined,
+  elapsedMs: number,
+  durationMs: number
+) {
+  if (mediaSource && mediaSource.width > 0 && mediaSource.height > 0) {
+    drawCover(
+      ctx,
+      mediaSource.source,
+      mediaSource.width,
+      mediaSource.height,
+      mediaRect,
+      mediaSource.zoom ?? 1
+    );
+    return;
+  }
+
+  if (assets.mediaImage) {
+    const t = Math.max(0, Math.min(1, elapsedMs / Math.max(1, durationMs)));
+    const zoom = 1 + t * 0.015;
+    drawCover(
+      ctx,
+      assets.mediaImage,
+      assets.mediaImage.naturalWidth,
+      assets.mediaImage.naturalHeight,
+      mediaRect,
+      zoom
+    );
+    return;
+  }
+
+  ctx.fillStyle = "#222";
+  ctx.fillRect(mediaRect.x, mediaRect.y, mediaRect.w, mediaRect.h);
+}
+
+function drawInstagramStorySurface(
+  ctx: CanvasRenderingContext2D,
+  scene: StorySceneModel,
+  layout: Layout,
   assets: StoryExportAssets,
   elapsedMs: number,
   durationMs: number,
   mediaSource?: StoryFrameMediaSource
 ) {
-  const layout = computeLayout();
-
-  ctx.clearRect(0, 0, STORY_VIDEO_EXPORT.width, STORY_VIDEO_EXPORT.height);
-  ctx.fillStyle = "#d8dbe0";
-  ctx.fillRect(0, 0, STORY_VIDEO_EXPORT.width, STORY_VIDEO_EXPORT.height);
-
   const domWrapperW = 340;
-  const domWrapperH = Math.round((domWrapperW * FRAME_NATIVE.h) / FRAME_NATIVE.w);
+  const domWrapperH = Math.round(
+    (domWrapperW * scene.geometry.frameNative.h) / scene.geometry.frameNative.w
+  );
   const domScreenW = domWrapperW * 0.6402;
   const domScreenH = domWrapperH * 0.8609;
   const sx = layout.screen.w / domScreenW;
   const sy = layout.screen.h / domScreenH;
   const ss = Math.min(sx, sy);
-
-  ctx.save();
-  roundedRectPath(
-    ctx,
-    layout.screen.x,
-    layout.screen.y,
-    layout.screen.w,
-    layout.screen.h,
-    layout.screenRadius
-  );
-  ctx.clip();
 
   ctx.fillStyle = "#111111";
   ctx.fillRect(layout.screen.x, layout.screen.y, layout.screen.w, layout.screen.h);
@@ -297,30 +450,7 @@ export function renderStoryExportFrame(
     h: layout.screen.h - (STORY_LAYOUT.mediaTop + STORY_LAYOUT.mediaBottom) * sy,
   };
 
-  if (mediaSource && mediaSource.width > 0 && mediaSource.height > 0) {
-    drawCover(
-      ctx,
-      mediaSource.source,
-      mediaSource.width,
-      mediaSource.height,
-      mediaRect,
-      mediaSource.zoom ?? 1
-    );
-  } else if (assets.mediaImage) {
-    const t = Math.max(0, Math.min(1, elapsedMs / Math.max(1, durationMs)));
-    const zoom = 1 + t * 0.015;
-    drawCover(
-      ctx,
-      assets.mediaImage,
-      assets.mediaImage.naturalWidth,
-      assets.mediaImage.naturalHeight,
-      mediaRect,
-      zoom
-    );
-  } else {
-    ctx.fillStyle = "#222";
-    ctx.fillRect(mediaRect.x, mediaRect.y, mediaRect.w, mediaRect.h);
-  }
+  drawStoryMedia(ctx, mediaRect, assets, mediaSource, elapsedMs, durationMs);
 
   const topFade = ctx.createLinearGradient(
     layout.screen.x,
@@ -363,13 +493,13 @@ export function renderStoryExportFrame(
     layout.screen.y + STORY_LAYOUT.avatarCenterY * sy,
     STORY_LAYOUT.avatarRadius * ss,
     assets.avatarImage,
-    (scene.clientName || "C").slice(0, 1).toUpperCase()
+    (scene.identity.clientName || "C").slice(0, 1).toUpperCase()
   );
 
   ctx.fillStyle = "#fff";
   ctx.font = `700 ${9 * ss}px ${FONT_STACK}`;
   ctx.fillText(
-    fitText(scene.clientName || "Client", 20),
+    fitText(scene.identity.clientName || "Client", 20),
     layout.screen.x + STORY_LAYOUT.nameX * sx,
     layout.screen.y + STORY_LAYOUT.nameY * sy
   );
@@ -387,12 +517,12 @@ export function renderStoryExportFrame(
     layout.screen.y + STORY_LAYOUT.closeY * sy
   );
 
-  if (scene.primaryText.trim()) {
+  if (scene.textLayer.primaryText.trim()) {
     ctx.fillStyle = "#fff";
     ctx.font = `600 ${11 * ss}px ${FONT_STACK}`;
     drawWrappedText(
       ctx,
-      scene.primaryText,
+      scene.textLayer.primaryText,
       layout.screen.x + STORY_LAYOUT.captionX * sx,
       layout.screen.y + layout.screen.h - STORY_LAYOUT.captionYFromBottom * sy,
       layout.screen.w - STORY_LAYOUT.captionX * 2 * sx,
@@ -430,15 +560,417 @@ export function renderStoryExportFrame(
     iconX += iconSize + iconGap;
   }
 
-  if (scene.ctaVisible) {
+  if (scene.textLayer.cta.visible) {
     drawStoryCtaPill(
       ctx,
       layout.screen,
       layout.screen.w / domScreenW,
-      scene.cta,
-      scene.ctaBgColor,
-      scene.ctaTextColor
+      scene.textLayer.cta.label,
+      scene.textLayer.cta.bgColor,
+      scene.textLayer.cta.textColor
     );
+  }
+}
+
+function drawShortVideoHeader(
+  ctx: CanvasRenderingContext2D,
+  scene: StorySceneModel,
+  layout: Layout
+) {
+  const s = layout.scale;
+  const isTikTok = scene.surface === "tiktok";
+  const handle = `@${(scene.identity.clientName || "client").toLowerCase().replace(/\s+/g, "")}`;
+
+  if (isTikTok) {
+    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    ctx.fillRect(layout.screen.x, layout.screen.y, layout.screen.w, 46 * s);
+    drawStoryStatusBar(ctx, layout, "light");
+
+    ctx.fillStyle = "rgba(255,255,255,0.45)";
+    ctx.font = `500 ${11 * s}px ${FONT_STACK}`;
+    ctx.textAlign = "center";
+    const tabs = ["Following", "Shop", "For You"];
+    const tabXs = [0.22, 0.44, 0.66];
+    tabs.forEach((tab, i) => {
+      if (tab === "For You") {
+        ctx.fillStyle = "#ffffff";
+        ctx.font = `700 ${11 * s}px ${FONT_STACK}`;
+      } else {
+        ctx.fillStyle = "rgba(255,255,255,0.45)";
+        ctx.font = `500 ${11 * s}px ${FONT_STACK}`;
+      }
+      ctx.fillText(tab, layout.screen.x + layout.screen.w * tabXs[i], layout.screen.y + 32 * s);
+    });
+
+    ctx.font = `700 ${11 * s}px ${FONT_STACK}`;
+    const activeTabW = ctx.measureText("For You").width;
+    const activeTabX = layout.screen.x + layout.screen.w * 0.66 - activeTabW / 2;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(activeTabX, layout.screen.y + 36 * s, activeTabW, 2 * s);
+    ctx.textAlign = "left";
+
+    const colX = layout.screen.x + layout.screen.w - 22 * s;
+    const colStartY = layout.screen.y + layout.screen.h * 0.42;
+    for (let i = 0; i < 4; i++) {
+      ctx.fillStyle = i === 0 ? "#fe2c55" : "rgba(255,255,255,0.85)";
+      ctx.beginPath();
+      ctx.arc(colX, colStartY + i * 36 * s, 10 * s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `700 ${13 * s}px ${FONT_STACK}`;
+    ctx.fillText(handle, layout.screen.x + 14 * s, layout.screen.y + layout.screen.h - 52 * s);
+
+    ctx.fillStyle = "rgba(0,0,0,0.88)";
+    ctx.fillRect(layout.screen.x, layout.screen.y + layout.screen.h - 36 * s, layout.screen.w, 36 * s);
+    const navStep = layout.screen.w / 5;
+    for (let i = 0; i < 5; i++) {
+      const cx = layout.screen.x + navStep * (i + 0.5);
+      const cy = layout.screen.y + layout.screen.h - 18 * s;
+      if (i === 2) {
+        ctx.fillStyle = "rgba(255,255,255,0.9)";
+        roundedRectPath(ctx, cx - 14 * s, cy - 9 * s, 28 * s, 18 * s, 4 * s);
+        ctx.fill();
+      } else {
+        ctx.fillStyle = i === 0 ? "#ffffff" : "rgba(255,255,255,0.5)";
+        ctx.beginPath();
+        ctx.arc(cx, cy, 7 * s, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    return;
+  }
+
+  ctx.fillStyle = "rgba(0,0,0,0.3)";
+  ctx.fillRect(layout.screen.x, layout.screen.y, layout.screen.w, 78 * s);
+  drawStoryStatusBar(ctx, layout, "light", "9:40");
+
+  const tabsY = layout.screen.y + 58 * s;
+
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = Math.max(1, 1.8 * s);
+  ctx.beginPath();
+  ctx.moveTo(layout.screen.x + 16 * s, tabsY);
+  ctx.lineTo(layout.screen.x + 31 * s, tabsY);
+  ctx.moveTo(layout.screen.x + 23.5 * s, tabsY - 7.5 * s);
+  ctx.lineTo(layout.screen.x + 23.5 * s, tabsY + 7.5 * s);
+  ctx.stroke();
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = `700 ${17 * s}px ${FONT_STACK}`;
+  ctx.fillText("Reels", layout.screen.x + 84 * s, tabsY + 6 * s);
+
+  ctx.fillStyle = "rgba(255,255,255,0.68)";
+  ctx.font = `600 ${16 * s}px ${FONT_STACK}`;
+  ctx.fillText("Friends", layout.screen.x + 157 * s, tabsY + 6 * s);
+
+  for (let i = 0; i < 3; i += 1) {
+    const r = 6.2 * s;
+    const cx = layout.screen.x + 255 * s + i * 10.2 * s;
+    const cy = tabsY - 2 * s;
+    ctx.fillStyle = i === 1 ? "#c95cff" : i === 2 ? "#ff3b30" : "#f8f8f8";
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = Math.max(1, 1.6 * s);
+  const iconX = layout.screen.x + layout.screen.w - 21 * s;
+  const iconY = tabsY - 7 * s;
+  for (let i = 0; i < 2; i += 1) {
+    const y = iconY + i * 8 * s;
+    ctx.beginPath();
+    ctx.moveTo(iconX - 9 * s, y);
+    ctx.lineTo(iconX + 7 * s, y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(iconX - (i === 0 ? 3 : -2) * s, y, 2.2 * s, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+function drawReelsActionRail(
+  ctx: CanvasRenderingContext2D,
+  layout: Layout,
+  assets: StoryExportAssets
+) {
+  const s = layout.scale;
+  const colX = layout.screen.x + layout.screen.w - 28 * s;
+  const startY = layout.screen.y + layout.screen.h * 0.57;
+  const iconSize = 23 * s;
+  const itemStep = 57 * s;
+
+  const entries: Array<{ icon: HTMLImageElement | null | undefined; count: string }> = [
+    { icon: assets.heartIcon, count: "14.5K" },
+    { icon: assets.commentIcon, count: "94" },
+    { icon: null, count: "169" },
+    { icon: assets.sendIcon, count: "8,576" },
+  ];
+
+  entries.forEach((entry, index) => {
+    const top = startY + index * itemStep;
+    if (entry.icon) {
+      drawTintedImage(
+        ctx,
+        entry.icon,
+        { x: colX - iconSize / 2, y: top - iconSize / 2, w: iconSize, h: iconSize },
+        "#ffffff"
+      );
+    } else {
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = Math.max(1, 1.9 * s);
+      ctx.beginPath();
+      ctx.moveTo(colX - 7 * s, top - 5 * s);
+      ctx.lineTo(colX + 6 * s, top - 13 * s);
+      ctx.lineTo(colX + 4 * s, top - 8 * s);
+      ctx.moveTo(colX + 7 * s, top + 5 * s);
+      ctx.lineTo(colX - 6 * s, top + 13 * s);
+      ctx.lineTo(colX - 4 * s, top + 8 * s);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    ctx.font = `600 ${8.8 * s}px ${FONT_STACK}`;
+    ctx.textAlign = "center";
+    ctx.fillText(entry.count, colX, top + 18.5 * s);
+  });
+  ctx.textAlign = "left";
+}
+
+function drawInstagramReelsFooter(
+  ctx: CanvasRenderingContext2D,
+  scene: StorySceneModel,
+  layout: Layout,
+  assets: StoryExportAssets
+) {
+  const s = layout.scale;
+  const safeName = fitText(scene.identity.clientName || "client", 18).toLowerCase().replace(/\s+/g, "");
+  const footerTop = layout.screen.y + layout.screen.h - 138 * s;
+  const navH = 40 * s;
+
+  const fade = ctx.createLinearGradient(0, footerTop - 56 * s, 0, footerTop);
+  fade.addColorStop(0, "rgba(0,0,0,0)");
+  fade.addColorStop(1, "rgba(0,0,0,0.62)");
+  ctx.fillStyle = fade;
+  ctx.fillRect(layout.screen.x, footerTop - 56 * s, layout.screen.w, 56 * s);
+
+  ctx.fillStyle = "rgba(0,0,0,0.60)";
+  ctx.fillRect(layout.screen.x, footerTop, layout.screen.w, layout.screen.h - (footerTop - layout.screen.y));
+
+  drawAvatar(
+    ctx,
+    layout.screen.x + 16 * s,
+    footerTop + 16 * s,
+    9.8 * s,
+    assets.avatarImage,
+    (scene.identity.clientName || "C").slice(0, 1).toUpperCase()
+  );
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = `700 ${10.5 * s}px ${FONT_STACK}`;
+  ctx.fillText(`@${safeName}`, layout.screen.x + 30 * s, footerTop + 13 * s);
+
+  ctx.fillStyle = "rgba(255,255,255,0.88)";
+  ctx.font = `500 ${8.8 * s}px ${FONT_STACK}`;
+  ctx.fillText("\u2197  dudebs \u00b7 Garden", layout.screen.x + 30 * s, footerTop + 26 * s);
+
+  ctx.strokeStyle = "rgba(255,255,255,0.9)";
+  strokeRoundedRect(
+    ctx,
+    {
+      x: layout.screen.x + 125 * s,
+      y: footerTop + 2 * s,
+      w: 58 * s,
+      h: 22 * s,
+    },
+    10 * s,
+    Math.max(1, 1.6 * s)
+  );
+  ctx.fillStyle = "#ffffff";
+  ctx.font = `700 ${10 * s}px ${FONT_STACK}`;
+  ctx.fillText("Follow", layout.screen.x + 142 * s, footerTop + 16 * s);
+
+  drawMoreIcon(
+    ctx,
+    layout.screen.x + layout.screen.w - 21 * s,
+    footerTop + 12 * s,
+    1.5 * s,
+    "#ffffff"
+  );
+
+  ctx.fillStyle = "rgba(255,255,255,0.92)";
+  ctx.font = `500 ${8.8 * s}px ${FONT_STACK}`;
+  drawWrappedText(
+    ctx,
+    scene.textLayer.primaryText || "Write your campaign copy here.",
+    layout.screen.x + 14 * s,
+    footerTop + 45 * s,
+    layout.screen.w - 66 * s,
+    1,
+    11 * s
+  );
+
+  ctx.strokeStyle = "rgba(255,255,255,0.6)";
+  strokeRoundedRect(
+    ctx,
+    {
+      x: layout.screen.x + layout.screen.w - 30 * s,
+      y: footerTop + 31 * s,
+      w: 18 * s,
+      h: 18 * s,
+    },
+    4 * s,
+    Math.max(1, 1.4 * s)
+  );
+
+  const navY = layout.screen.y + layout.screen.h - navH;
+  ctx.fillStyle = "rgba(4,12,24,0.94)";
+  ctx.fillRect(layout.screen.x, navY, layout.screen.w, navH);
+  ctx.fillStyle = "rgba(255,255,255,0.28)";
+  ctx.fillRect(layout.screen.x, navY, layout.screen.w, 1 * s);
+
+  const navStep = layout.screen.w / 5;
+  for (let i = 0; i < 5; i += 1) {
+    const cx = layout.screen.x + navStep * (i + 0.5);
+    const cy = navY + navH / 2;
+    ctx.fillStyle = i === 2 ? "#ff3040" : "rgba(255,255,255,0.92)";
+    if (i === 1) {
+      fillRoundedRect(ctx, { x: cx - 8 * s, y: cy - 6 * s, w: 16 * s, h: 12 * s }, 3 * s);
+      ctx.fillStyle = "#0d1523";
+      ctx.beginPath();
+      ctx.moveTo(cx - 2 * s, cy - 4 * s);
+      ctx.lineTo(cx + 4 * s, cy);
+      ctx.lineTo(cx - 2 * s, cy + 4 * s);
+      ctx.closePath();
+      ctx.fill();
+      continue;
+    }
+    ctx.beginPath();
+    ctx.arc(cx, cy, i === 4 ? 5.4 * s : 5 * s, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawShortVideoSurface(
+  ctx: CanvasRenderingContext2D,
+  scene: StorySceneModel,
+  layout: Layout,
+  assets: StoryExportAssets,
+  elapsedMs: number,
+  durationMs: number,
+  mediaSource?: StoryFrameMediaSource
+) {
+  ctx.fillStyle = "#000000";
+  ctx.fillRect(layout.screen.x, layout.screen.y, layout.screen.w, layout.screen.h);
+
+  const isReels = scene.surface === "instagram-reels";
+  const mediaRect: Rect = isReels
+    ? {
+        x: layout.screen.x,
+        y: layout.screen.y,
+        w: layout.screen.w,
+        h: layout.screen.h,
+      }
+    : {
+        x: layout.screen.x,
+        y: layout.screen.y,
+        w: layout.screen.w,
+        h: Math.min(layout.screen.w / (9 / 16), layout.screen.h - 168 * layout.scale),
+      };
+
+  drawStoryMedia(ctx, mediaRect, assets, mediaSource, elapsedMs, durationMs);
+
+  if (isReels) {
+    const topFade = ctx.createLinearGradient(
+      layout.screen.x,
+      layout.screen.y,
+      layout.screen.x,
+      layout.screen.y + 160 * layout.scale
+    );
+    topFade.addColorStop(0, "rgba(0,0,0,0.42)");
+    topFade.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = topFade;
+    ctx.fillRect(layout.screen.x, layout.screen.y, layout.screen.w, 160 * layout.scale);
+
+    drawShortVideoHeader(ctx, scene, layout);
+    drawReelsActionRail(ctx, layout, assets);
+    drawInstagramReelsFooter(ctx, scene, layout, assets);
+    return;
+  }
+
+  drawShortVideoHeader(ctx, scene, layout);
+
+  ctx.fillStyle = "rgba(255,255,255,0.18)";
+  fillRoundedRect(
+    ctx,
+    {
+      x: layout.screen.x + layout.screen.w - 92 * layout.scale,
+      y: layout.screen.y + 28 * layout.scale,
+      w: 76 * layout.scale,
+      h: 24 * layout.scale,
+    },
+    12 * layout.scale
+  );
+
+  ctx.fillStyle = "rgba(255,255,255,0.95)";
+  ctx.font = `500 ${12 * layout.scale}px ${FONT_STACK}`;
+  drawWrappedText(
+    ctx,
+    scene.textLayer.primaryText || "Write your campaign body copy to preview it here.",
+    mediaRect.x + 14 * layout.scale,
+    mediaRect.y + mediaRect.h - 84 * layout.scale,
+    mediaRect.w - 28 * layout.scale,
+    2,
+    15 * layout.scale
+  );
+
+  drawStoryCtaBar(
+    ctx,
+    layout,
+    {
+      x: mediaRect.x,
+      y: mediaRect.y + mediaRect.h + 1 * layout.scale,
+      w: mediaRect.w,
+      h: 42 * layout.scale,
+    },
+    scene.textLayer.cta.label,
+    scene.textLayer.cta.bgColor,
+    scene.textLayer.cta.textColor
+  );
+}
+
+export function renderStoryExportFrame(
+  ctx: CanvasRenderingContext2D,
+  scene: StorySceneModel,
+  assets: StoryExportAssets,
+  elapsedMs: number,
+  durationMs: number,
+  mediaSource?: StoryFrameMediaSource
+) {
+  const layout = computeLayout(scene);
+  const { width: outputW, height: outputH } = scene.coordinateSpace;
+
+  ctx.clearRect(0, 0, outputW, outputH);
+  ctx.fillStyle = "#d8dbe0";
+  ctx.fillRect(0, 0, outputW, outputH);
+
+  ctx.save();
+  roundedRectPath(
+    ctx,
+    layout.screen.x,
+    layout.screen.y,
+    layout.screen.w,
+    layout.screen.h,
+    layout.screenRadius
+  );
+  ctx.clip();
+
+  if (scene.surface === "instagram-story") {
+    drawInstagramStorySurface(ctx, scene, layout, assets, elapsedMs, durationMs, mediaSource);
+  } else {
+    drawShortVideoSurface(ctx, scene, layout, assets, elapsedMs, durationMs, mediaSource);
   }
 
   ctx.restore();

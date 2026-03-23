@@ -1,6 +1,7 @@
 import { STORY_VIDEO_EXPORT } from "./constants";
 import { loadStoryExportAssets } from "./loadAssets";
 import { renderStoryExportFrame } from "./renderFrame";
+import { buildStorySceneModel } from "./sceneModel";
 import type {
   StoryExportImageScene,
   StoryExportVideoScene,
@@ -121,19 +122,25 @@ async function runRecorder(
 }
 
 export async function exportInstagramStoryImageWebm(
-  scene: StoryExportImageScene
+  sceneInput: StoryExportImageScene
 ): Promise<Blob> {
+  const scene = buildStorySceneModel(sceneInput);
   const ctx = createExportCanvas();
   const assets = await loadStoryExportAssets(scene);
 
-  return await runRecorder(ctx, STORY_VIDEO_EXPORT.imageDurationMs, (elapsedMs, durationMs) => {
+  return await runRecorder(ctx, scene.timing.defaultImageDurationMs, (elapsedMs, durationMs) => {
     renderStoryExportFrame(ctx, scene, assets, elapsedMs, durationMs);
   });
 }
 
 export async function exportInstagramStoryVideoWebm(
-  scene: StoryExportVideoScene
+  sceneInput: StoryExportVideoScene
 ): Promise<Blob> {
+  const scene = buildStorySceneModel(sceneInput);
+  if (scene.media.kind !== "video") {
+    throw new Error("Story video export requires a video media layer.");
+  }
+  const videoLayer = scene.media;
   const ctx = createExportCanvas();
   const assets = await loadStoryExportAssets(scene);
 
@@ -141,17 +148,17 @@ export async function exportInstagramStoryVideoWebm(
   video.preload = "auto";
   video.playsInline = true;
   video.muted = true;
-  video.src = scene.media.url;
+  video.src = videoLayer.url;
 
   await waitForVideoEvent(video, "loadedmetadata");
   await waitForVideoEvent(video, "canplay");
 
   const rawDurationMs = Number.isFinite(video.duration)
     ? video.duration * 1000
-    : STORY_VIDEO_EXPORT.imageDurationMs;
+    : scene.timing.defaultImageDurationMs;
   const durationMs = Math.max(
     1000,
-    Math.min(rawDurationMs, STORY_VIDEO_EXPORT.maxVideoDurationMs)
+    Math.min(rawDurationMs, scene.timing.maxVideoDurationMs)
   );
 
   video.currentTime = 0;
@@ -173,7 +180,7 @@ export async function exportInstagramStoryVideoWebm(
           source: video,
           width: video.videoWidth,
           height: video.videoHeight,
-          zoom: 1,
+          zoom: videoLayer.zoom,
         }
       );
     });
@@ -187,10 +194,11 @@ export async function exportInstagramStoryVideoWebm(
 
 // Keep this helper to simplify dev debugging if needed.
 export async function exportStoryFramePngFromScene(
-  scene: StoryExportImageScene
+  sceneInput: StoryExportImageScene
 ): Promise<Blob> {
+  const scene = buildStorySceneModel(sceneInput);
   const ctx = createExportCanvas();
   const assets = await loadStoryExportAssets(scene);
-  renderStoryExportFrame(ctx, scene, assets, 0, STORY_VIDEO_EXPORT.imageDurationMs);
+  renderStoryExportFrame(ctx, scene, assets, 0, scene.timing.defaultImageDurationMs);
   return await blobFromCanvas(ctx.canvas);
 }

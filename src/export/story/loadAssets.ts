@@ -2,7 +2,8 @@ import {
   FRAME_IMAGE_PATH,
   STORY_ICON_PATHS,
 } from "./constants";
-import type { StoryExportAssets, StoryExportScene } from "./types";
+import type { StorySceneModel } from "./sceneModel";
+import type { StoryExportAssets } from "./types";
 
 const imageCache = new Map<string, HTMLImageElement | null>();
 
@@ -24,13 +25,13 @@ async function loadImage(url: string | undefined): Promise<HTMLImageElement | nu
 }
 
 export async function loadStoryExportAssets(
-  scene: StoryExportScene
+  scene: StorySceneModel
 ): Promise<StoryExportAssets> {
   const mediaImageUrl = scene.media.kind === "image" ? scene.media.url : undefined;
   const [frameImage, avatarImage, mediaImage, heartIcon, commentIcon, sendIcon] =
     await Promise.all([
       loadImage(FRAME_IMAGE_PATH),
-      loadImage(scene.clientAvatarUrl),
+      loadImage(scene.identity.clientAvatarUrl),
       loadImage(mediaImageUrl),
       loadImage(STORY_ICON_PATHS.heart),
       loadImage(STORY_ICON_PATHS.comment),

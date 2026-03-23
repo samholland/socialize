@@ -1,4 +1,7 @@
+export type StoryLikeSurface = "instagram-story" | "instagram-reels" | "tiktok";
+
 export type StoryExportScene = {
+  surface?: StoryLikeSurface;
   clientName: string;
   clientAvatarUrl?: string;
   primaryText: string;
