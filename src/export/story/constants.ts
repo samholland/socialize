@@ -15,6 +15,15 @@ export const STORY_ICON_PATHS = {
   heart: "/images/ig_heart.svg",
   comment: "/images/ig_comment.svg",
   send: "/images/ig_send.svg",
+  repost: "/images/ig_repost.svg",
+} as const;
+
+export const STORY_REELS_NAV_ICON_PATHS = {
+  homeInactive: "/images/ig_home_inactive.svg",
+  reelsActive: "/images/ig_reels_active.svg",
+  send: "/images/ig_send.svg",
+  search: "/images/ig_search.svg",
+  profileBlank: "/images/ig_pfp_blank.svg",
 } as const;
 
 export const STORY_LAYOUT = {

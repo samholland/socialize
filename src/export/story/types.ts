@@ -39,4 +39,10 @@ export type StoryExportAssets = {
   heartIcon: HTMLImageElement | null;
   commentIcon: HTMLImageElement | null;
   sendIcon: HTMLImageElement | null;
+  repostIcon: HTMLImageElement | null;
+  navHomeInactiveIcon: HTMLImageElement | null;
+  navReelsActiveIcon: HTMLImageElement | null;
+  navSendIcon: HTMLImageElement | null;
+  navSearchIcon: HTMLImageElement | null;
+  navProfileBlankIcon: HTMLImageElement | null;
 };

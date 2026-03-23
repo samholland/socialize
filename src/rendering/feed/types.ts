@@ -1,4 +1,4 @@
-import type { Layout, MediaAspect, PreviewMedia } from "../types";
+import type { Layout, MediaAspect, PreviewMedia } from "@/components/preview-canvas/types";
 
 export type DrawFeedSurfaceArgs = {
   ctx: CanvasRenderingContext2D;

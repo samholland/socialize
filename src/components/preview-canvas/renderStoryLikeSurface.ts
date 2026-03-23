@@ -1,3 +1,7 @@
+import {
+  STORY_ICON_PATHS,
+  STORY_REELS_NAV_ICON_PATHS,
+} from "@/export/story/constants";
 import { renderStoryExportFrame } from "@/export/story/renderFrame";
 import { buildStorySceneModel } from "@/export/story/sceneModel";
 import type {
@@ -5,7 +9,6 @@ import type {
   StoryFrameMediaSource,
   StoryLikeSurface,
 } from "@/export/story/types";
-import { FEED_ACTION_ICON_PATHS } from "./constants";
 import type { PreviewMedia } from "./types";
 import { toStoryExportMedia } from "./utils";
 
@@ -52,12 +55,30 @@ export async function drawStoryLikeSurface({
     media: toStoryExportMedia(media),
   });
 
-  const [avatarImage, mediaImage, heartIcon, commentIcon, sendIcon] = await Promise.all([
+  const [
+    avatarImage,
+    mediaImage,
+    heartIcon,
+    commentIcon,
+    sendIcon,
+    repostIcon,
+    navHomeInactiveIcon,
+    navReelsActiveIcon,
+    navSendIcon,
+    navSearchIcon,
+    navProfileBlankIcon,
+  ] = await Promise.all([
     loadImageFromUrl(scene.identity.clientAvatarUrl),
     scene.media.kind === "image" ? loadImageFromUrl(scene.media.url) : Promise.resolve(null),
-    loadImageFromUrl(FEED_ACTION_ICON_PATHS[0]),
-    loadImageFromUrl(FEED_ACTION_ICON_PATHS[1]),
-    loadImageFromUrl(FEED_ACTION_ICON_PATHS[2]),
+    loadImageFromUrl(STORY_ICON_PATHS.heart),
+    loadImageFromUrl(STORY_ICON_PATHS.comment),
+    loadImageFromUrl(STORY_ICON_PATHS.send),
+    loadImageFromUrl(STORY_ICON_PATHS.repost),
+    loadImageFromUrl(STORY_REELS_NAV_ICON_PATHS.homeInactive),
+    loadImageFromUrl(STORY_REELS_NAV_ICON_PATHS.reelsActive),
+    loadImageFromUrl(STORY_REELS_NAV_ICON_PATHS.send),
+    loadImageFromUrl(STORY_REELS_NAV_ICON_PATHS.search),
+    loadImageFromUrl(STORY_REELS_NAV_ICON_PATHS.profileBlank),
   ]);
 
   const assets: StoryExportAssets = {
@@ -67,6 +88,12 @@ export async function drawStoryLikeSurface({
     heartIcon,
     commentIcon,
     sendIcon,
+    repostIcon,
+    navHomeInactiveIcon,
+    navReelsActiveIcon,
+    navSendIcon,
+    navSearchIcon,
+    navProfileBlankIcon,
   };
 
   const mediaSource: StoryFrameMediaSource | undefined =
@@ -94,4 +121,3 @@ export async function drawStoryLikeSurface({
     mediaSource
   );
 }
-

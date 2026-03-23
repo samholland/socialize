@@ -1,5 +1,5 @@
-import { FONT_STACK } from "../constants";
-import type { Layout, Rect } from "../types";
+import { FONT_STACK } from "@/components/preview-canvas/constants";
+import type { Layout, Rect } from "@/components/preview-canvas/types";
 import {
   alphaHex,
   drawCover,
@@ -7,52 +7,10 @@ import {
   fitText,
   roundedRectPath,
   strokeRoundedRect,
-} from "../utils";
+} from "@/rendering/core/primitives";
 import type { DrawFeedSurfaceArgs } from "./types";
 
-export function drawWrappedText(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  x: number,
-  y: number,
-  maxWidth: number,
-  maxLines: number,
-  lineHeight: number
-) {
-  const words = text.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return;
-
-  const lines: string[] = [];
-  let current = words[0];
-
-  for (let i = 1; i < words.length; i += 1) {
-    const candidate = `${current} ${words[i]}`;
-    if (ctx.measureText(candidate).width <= maxWidth) {
-      current = candidate;
-      continue;
-    }
-
-    lines.push(current);
-    current = words[i];
-    if (lines.length === maxLines - 1) break;
-  }
-
-  if (lines.length < maxLines) lines.push(current);
-
-  const consumedWords = lines.join(" ").split(/\s+/).filter(Boolean).length;
-  if (consumedWords < words.length) {
-    const lastIndex = Math.min(maxLines - 1, lines.length - 1);
-    let line = lines[lastIndex] ?? "";
-    while (line.length > 0 && ctx.measureText(`${line}...`).width > maxWidth) {
-      line = line.slice(0, -1);
-    }
-    lines[lastIndex] = `${line}...`;
-  }
-
-  lines.forEach((line, index) => {
-    ctx.fillText(line, x, y + index * lineHeight);
-  });
-}
+export { drawWrappedText } from "@/rendering/core/primitives";
 
 export function drawFeedStatusBar(ctx: CanvasRenderingContext2D, layout: Layout) {
   const s = layout.scale;

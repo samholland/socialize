@@ -11,7 +11,7 @@ import {
   INSTAGRAM_REELS_OVERLAY_PATH,
   SCREEN_NATIVE,
 } from "./preview-canvas/constants";
-import { drawFeedSurface } from "./preview-canvas/renderFeedSurface";
+import { drawFeedSurface } from "@/rendering/feed/renderFeedSurface";
 import { drawStoryLikeSurface } from "./preview-canvas/renderStoryLikeSurface";
 import type { Layout, MediaAspect, PreviewMedia, Rect } from "./preview-canvas/types";
 import { normalizeHexColor, roundedRectPath, storySurfaceFromPlatform } from "./preview-canvas/utils";
