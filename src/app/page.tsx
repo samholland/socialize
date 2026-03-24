@@ -171,6 +171,17 @@ function contrastText(bg: string): string {
   return 0.299 * r + 0.587 * g + 0.114 * b >= 155 ? "#111111" : "#ffffff";
 }
 
+function platformTreeBadge(platform: Platform): string {
+  const labels: Record<Platform, string> = {
+    "Instagram Feed": "IG",
+    "Instagram Story": "IG STORY",
+    "Instagram Reels": "IG REEL",
+    "Facebook Feed": "FB",
+    TikTok: "TIKTOK",
+  };
+  return labels[platform];
+}
+
 function normalizeObjective(v: unknown): CampaignObjective {
   if (v === "Consideration" || v === "Conversion") return v;
   return "Awareness";
@@ -1416,7 +1427,6 @@ export default function Home() {
       campaignId: campaign?.id ?? "",
     });
     setSelectionLevel("client");
-    setExpandedClients((prev) => ({ ...prev, [clientId]: prev[clientId] !== false }));
   }
 
   function selectProject(clientId: string, projectId: string) {
@@ -1430,7 +1440,6 @@ export default function Home() {
       campaignId: campaign?.id ?? "",
     });
     setSelectionLevel("project");
-    setExpandedProjects((prev) => ({ ...prev, [projectId]: prev[projectId] !== false }));
   }
 
   function selectCampaign(clientId: string, projectId: string, campaignId: string) {
@@ -1898,18 +1907,13 @@ export default function Home() {
                   <div key={client.id} className="tree-section">
                     {/* Client row */}
                     <div
-                      className={`tree-row${isClientSelected && selectionLevel === "client" ? " is-selected" : ""}`}
-                      onClick={() => selectClient(client.id)}
+                      className={`tree-row tree-row-client tree-row-with-toggle${isClientSelected && selectionLevel === "client" ? " is-selected" : ""}`}
+                      onClick={() => {
+                        selectClient(client.id);
+                        toggleClient(client.id);
+                      }}
                       onDoubleClick={() => beginClientEdit(client.id, client.name)}
                     >
-                      <button
-                        className="tree-toggle"
-                        onClick={(e) => { e.stopPropagation(); toggleClient(client.id); }}
-                        tabIndex={-1}
-                      >
-                        <IconChevron open={isClientExpanded} />
-                      </button>
-
                       {client.profileImageDataUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
@@ -1943,27 +1947,19 @@ export default function Home() {
                         </span>
                       )}
 
-                      <div className="row-actions" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          className="row-act-btn"
-                          title="Duplicate client"
-                          onClick={() => duplicateClient(client.id)}
-                        >
-                          <IconDuplicate />
-                        </button>
-                        <button
-                          className="row-act-btn is-danger"
-                          title="Delete client"
-                          onClick={() => deleteClient(client.id)}
-                        >
-                          <IconTrash />
-                        </button>
-                      </div>
+                      <button
+                        className="tree-toggle tree-toggle-end"
+                        onClick={(e) => { e.stopPropagation(); toggleClient(client.id); }}
+                        tabIndex={-1}
+                      >
+                        <IconChevron open={isClientExpanded} />
+                      </button>
+
                     </div>
 
                     {/* Projects */}
-                    {isClientExpanded && (
-                      <>
+                    <div className={`tree-client-children${isClientExpanded ? " is-open" : ""}`}>
+                      <div className="tree-client-children-inner">
                         {client.projects.map((project) => {
                           const isProjSelected =
                             isClientSelected && selection.projectId === project.id;
@@ -1976,20 +1972,15 @@ export default function Home() {
                             <div key={project.id}>
                               {/* Project row */}
                               <div
-                                className={`tree-row tree-row-project${isProjSelected && selectionLevel === "project" ? " is-selected" : ""}`}
-                                onClick={() => selectProject(client.id, project.id)}
+                                className={`tree-row tree-row-project tree-row-with-toggle${isProjSelected && selectionLevel === "project" ? " is-selected" : ""}`}
+                                onClick={() => {
+                                  selectProject(client.id, project.id);
+                                  toggleProject(project.id);
+                                }}
                                 onDoubleClick={() =>
                                   beginProjectEdit(client.id, project.id, project.name)
                                 }
                               >
-                                <button
-                                  className="tree-toggle"
-                                  onClick={(e) => { e.stopPropagation(); toggleProject(project.id); }}
-                                  tabIndex={-1}
-                                >
-                                  <IconChevron open={isProjExpanded} />
-                                </button>
-
                                 {isEditingProj ? (
                                   <input
                                     autoFocus
@@ -2008,30 +1999,21 @@ export default function Home() {
                                   </span>
                                 )}
 
-                                <div
-                                  className="row-actions"
-                                  onClick={(e) => e.stopPropagation()}
+                                <button
+                                  className="tree-toggle tree-toggle-end"
+                                  onClick={(e) => { e.stopPropagation(); toggleProject(project.id); }}
+                                  tabIndex={-1}
                                 >
-                                  <button
-                                    className="row-act-btn"
-                                    title="Duplicate project"
-                                    onClick={() => duplicateProject(client.id, project.id)}
-                                  >
-                                    <IconDuplicate />
-                                  </button>
-                                  <button
-                                    className="row-act-btn is-danger"
-                                    title="Delete project"
-                                    onClick={() => deleteProject(client.id, project.id)}
-                                  >
-                                    <IconTrash />
-                                  </button>
-                                </div>
+                                  <IconChevron open={isProjExpanded} />
+                                </button>
+
                               </div>
 
                               {/* Campaigns */}
-                              {isProjExpanded && (
-                                <>
+                              <div
+                                className={`tree-project-children${isProjExpanded ? " is-open" : ""}`}
+                              >
+                                <div className="tree-project-children-inner">
                                   {project.campaigns.map((campaign) => {
                                     const isCampSelected =
                                       isProjSelected && selection.campaignId === campaign.id;
@@ -2055,10 +2037,6 @@ export default function Home() {
                                           )
                                         }
                                       >
-                                        <div
-                                          className={`status-dot status-dot-${campaign.status}`}
-                                        />
-
                                         {isEditingCamp ? (
                                           <input
                                             autoFocus
@@ -2072,19 +2050,15 @@ export default function Home() {
                                             onClick={(e) => e.stopPropagation()}
                                           />
                                         ) : (
-                                          <span className="tree-label tree-label-campaign">
-                                            {campaign.name}
+                                          <span className="tree-campaign-main">
+                                            <span className="tree-label tree-label-campaign">
+                                              {campaign.name}
+                                            </span>
+                                            <span className="platform-pill">
+                                              {platformTreeBadge(campaign.platform)}
+                                            </span>
                                           </span>
                                         )}
-
-                                        <span className="platform-pill">
-                                          {campaign.platform
-                                            .replace("Instagram ", "IG ")
-                                            .replace("Facebook ", "FB ")
-                                            .replace("LinkedIn ", "LI ")
-                                            .replace("Feed", "")
-                                            .trim()}
-                                        </span>
 
                                         <div
                                           className="row-actions"
@@ -2120,8 +2094,8 @@ export default function Home() {
                                   >
                                     <IconPlus /> Add Creative
                                   </button>
-                                </>
-                              )}
+                                </div>
+                              </div>
                             </div>
                           );
                         })}
@@ -2133,8 +2107,8 @@ export default function Home() {
                         >
                           <IconPlus /> Add Project
                         </button>
-                      </>
-                    )}
+                      </div>
+                    </div>
                   </div>
                 );
               })}

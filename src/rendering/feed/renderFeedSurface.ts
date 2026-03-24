@@ -378,6 +378,11 @@ async function drawFacebookFeedSurface(args: DrawFeedSurfaceArgs) {
 
   const s = layout.scale;
   const screen = layout.screen;
+  const [fbLikeIcon, fbCommentIcon, fbShareIcon] = await Promise.all([
+    loadImageFromUrl("/images/fb_like.svg"),
+    loadImageFromUrl("/images/fb_comment.svg"),
+    loadImageFromUrl("/images/fb_share.svg"),
+  ]);
 
   clipScreen(ctx, layout);
 
@@ -495,15 +500,54 @@ async function drawFacebookFeedSurface(args: DrawFeedSurfaceArgs) {
   y += ctaH;
 
   ctx.fillStyle = "#ffffff";
-  ctx.fillRect(cardX, y, cardW, 28 * s);
+  const reactionsH = 26 * s;
+  ctx.fillRect(cardX, y, cardW, reactionsH);
   ctx.fillStyle = "#65676b";
-  ctx.font = `500 ${9.2 * s}px ${FONT_STACK}`;
-  ctx.fillText("👍 8.6K    💬 3.7K    ↩", cardX + 8 * s, y + 18 * s);
+  ctx.font = `500 ${10 * s}px ${FONT_STACK}`;
+  ctx.fillText("8.6K", cardX + 20 * s, y + 17 * s);
+  ctx.textAlign = "right";
+  ctx.fillText("3.7K comments · 588 shares", cardX + cardW - 8 * s, y + 17 * s);
+  ctx.textAlign = "left";
   ctx.fillStyle = "#2f73ff";
   ctx.beginPath();
-  ctx.arc(cardX + cardW - 12 * s, y + 14 * s, 4.2 * s, 0, Math.PI * 2);
+  ctx.arc(cardX + 10 * s, y + 13 * s, 6 * s, 0, Math.PI * 2);
   ctx.fill();
-  y += 28 * s;
+  y += reactionsH;
+
+  ctx.fillStyle = "#f2f3f5";
+  ctx.fillRect(cardX, y, cardW, 1 * s);
+  y += 1 * s;
+
+  const actionsH = 34 * s;
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(cardX, y, cardW, actionsH);
+  ctx.font = `600 ${12 * s}px ${FONT_STACK}`;
+  const buttonLabels = ["Like", "Comment", "Share"];
+  const buttonIcons = [fbLikeIcon, fbCommentIcon, fbShareIcon];
+  const buttonTextColor = "#65676b";
+  const buttonStep = cardW / 3;
+  const iconSize = 14 * s;
+  const iconGap = 5 * s;
+
+  buttonLabels.forEach((label, index) => {
+    const slotCenterX = cardX + buttonStep * index + buttonStep / 2;
+    const labelWidth = ctx.measureText(label).width;
+    const contentWidth = iconSize + iconGap + labelWidth;
+    const contentX = slotCenterX - contentWidth / 2;
+    const icon = buttonIcons[index];
+    if (icon) {
+      drawTintedImage(
+        ctx,
+        icon,
+        { x: contentX, y: y + (actionsH - iconSize) / 2, w: iconSize, h: iconSize },
+        buttonTextColor
+      );
+    }
+    ctx.fillStyle = buttonTextColor;
+    ctx.fillText(label, contentX + iconSize + iconGap, y + 22 * s);
+  });
+
+  y += actionsH;
   ctx.fillStyle = "#f2f3f5";
   ctx.fillRect(cardX, y, cardW, 1 * s);
 
