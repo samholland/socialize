@@ -2,6 +2,7 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import {
+  FACEBOOK_FEED_OVERLAY_PATH,
   CANVAS_H,
   CANVAS_W,
   FONT_STACK,
@@ -24,6 +25,9 @@ export type PreviewCanvasHandle = {
 
 type Props = {
   primaryText: string;
+  facebookPageName?: string;
+  headline?: string;
+  url?: string;
   cta: string;
   ctaVisible?: boolean;
   ctaBgColor: string;
@@ -45,6 +49,9 @@ type Props = {
 export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function PreviewCanvas(
   {
     primaryText,
+    facebookPageName = "",
+    headline = "",
+    url = "",
     cta,
     ctaVisible = true,
     ctaBgColor,
@@ -190,6 +197,9 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
         platform,
         mediaAspect,
         primaryText,
+        facebookPageName,
+        headline,
+        url,
         cta,
         ctaBgColor: resolvedCtaBgColor,
         ctaTextColor: resolvedCtaTextColor,
@@ -218,6 +228,8 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
         ? INSTAGRAM_FEED_OVERLAY_PATH
         : platformKey === "instagram reels"
           ? INSTAGRAM_REELS_OVERLAY_PATH
+          : platformKey === "facebook feed"
+            ? FACEBOOK_FEED_OVERLAY_PATH
           : null;
     if (includeDebugOverlays && instagramFeedOverlayEnabled && overlayPath) {
       const overlay = await loadImageFromUrl(overlayPath);
@@ -256,6 +268,9 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     primaryText,
+    facebookPageName,
+    headline,
+    url,
     cta,
     ctaBgColor,
     ctaTextColor,

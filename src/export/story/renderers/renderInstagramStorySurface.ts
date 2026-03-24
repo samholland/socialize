@@ -188,7 +188,7 @@ export function renderInstagramStorySurface({
   ctx.fillText(
     "Ad",
     layout.screen.x + STORY_LAYOUT.footerLabelX * sx,
-    layout.screen.y + layout.screen.h - STORY_LAYOUT.footerLabelBaselineFromBottom * sy
+    layout.screen.y + layout.screen.h - STORY_LAYOUT.footerLabelBaselineFromBottom - 20 * sy
   );
 
   const iconSize = STORY_LAYOUT.footerIconSize * ss;

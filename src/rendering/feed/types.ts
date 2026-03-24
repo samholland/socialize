@@ -6,6 +6,9 @@ export type DrawFeedSurfaceArgs = {
   platform: string;
   mediaAspect: MediaAspect;
   primaryText: string;
+  facebookPageName: string;
+  headline: string;
+  url: string;
   cta: string;
   ctaBgColor: string;
   ctaTextColor: string;

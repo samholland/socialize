@@ -10,6 +10,7 @@ export const SCREEN_NATIVE = { x: 333, y: 194, w: 1179, h: 2556 } as const;
 export const FRAME_IMAGE_PATH = "/images/iphone_frame.png";
 export const INSTAGRAM_FEED_OVERLAY_PATH = "/images/testing/overlay1.png";
 export const INSTAGRAM_REELS_OVERLAY_PATH = "/images/testing/overlay-reels.png";
+export const FACEBOOK_FEED_OVERLAY_PATH = "/images/testing/overlay-facebook.png";
 export const VERIFIED_ICON_PATH = "/images/ui_verified.svg";
 
 export const FEED_NAV_ICON_PATHS = [

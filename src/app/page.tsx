@@ -43,6 +43,9 @@ type Campaign = {
   platform: Platform;
   mediaAspect: MediaAspect;
   primaryText: string;
+  facebookPageName: string;
+  headline: string;
+  url: string;
   cta: string;
   ctaVisible: boolean;
   audienceProfile: string;
@@ -203,6 +206,9 @@ function newCampaign(
     platform: "Instagram Feed",
     mediaAspect: "1:1",
     primaryText: "",
+    facebookPageName: "",
+    headline: "",
+    url: "",
     cta: opts?.defaultCta ?? "Learn More",
     ctaVisible: true,
     audienceProfile: opts?.audienceProfile ?? "",
@@ -251,6 +257,18 @@ function normalizeCampaign(c: Campaign): Campaign {
     messagePillar:
       typeof (c as { messagePillar?: unknown }).messagePillar === "string"
         ? (c.messagePillar ?? "")
+        : "",
+    facebookPageName:
+      typeof (c as { facebookPageName?: unknown }).facebookPageName === "string"
+        ? ((c as { facebookPageName?: string }).facebookPageName ?? "")
+        : "",
+    headline:
+      typeof (c as { headline?: unknown }).headline === "string"
+        ? ((c as { headline?: string }).headline ?? "")
+        : "",
+    url:
+      typeof (c as { url?: unknown }).url === "string"
+        ? ((c as { url?: string }).url ?? "")
         : "",
     status:
       (c as { status?: unknown }).status === "ready" ? "ready" : "draft",
@@ -469,6 +487,9 @@ function generateProjectCsv(client: Client, project: Project): string {
     "audience_profile",
     "message_pillar",
     "primary_text",
+    "facebook_page_name",
+    "headline",
+    "url",
     "cta",
     "cta_bg_color",
     "cta_text_color",
@@ -490,6 +511,9 @@ function generateProjectCsv(client: Client, project: Project): string {
       formatCsvCell(c.audienceProfile),
       formatCsvCell(c.messagePillar),
       formatCsvCell(c.primaryText),
+      formatCsvCell(c.facebookPageName),
+      formatCsvCell(c.headline),
+      formatCsvCell(c.url),
       formatCsvCell(c.cta),
       formatCsvCell(c.ctaBgColor),
       formatCsvCell(c.ctaTextColor),
@@ -2490,6 +2514,7 @@ export default function Home() {
     const campaign = selectedCampaign;
     const project = selectedProject;
     const isInstagramStory = campaign.platform === "Instagram Story";
+    const isFacebookFeed = campaign.platform === "Facebook Feed";
 
     return (
       <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -2623,6 +2648,43 @@ export default function Home() {
                 />
               </div>
 
+              {isFacebookFeed && (
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">Page Name</label>
+                    <input
+                      className="form-input"
+                      value={campaign.facebookPageName}
+                      onChange={(e) => updateCampaign({ facebookPageName: e.target.value })}
+                      placeholder="e.g. PODS Moving & Storage"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {isFacebookFeed && (
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">Headline</label>
+                    <input
+                      className="form-input"
+                      value={campaign.headline}
+                      onChange={(e) => updateCampaign({ headline: e.target.value })}
+                      placeholder="e.g. New Collection Available Now"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">URL</label>
+                    <input
+                      className="form-input"
+                      value={campaign.url}
+                      onChange={(e) => updateCampaign({ url: e.target.value })}
+                      placeholder="e.g. example.com/product"
+                    />
+                  </div>
+                </div>
+              )}
+
               <div className="form-row">
                 <div className="form-group">
                   <label className="form-label">
@@ -2744,8 +2806,10 @@ export default function Home() {
 
     const campaign = selectedCampaign;
     const client = selectedClient;
-    const isInstagramOverlayCampaign =
-      campaign.platform === "Instagram Feed" || campaign.platform === "Instagram Reels";
+    const isOverlayCampaign =
+      campaign.platform === "Instagram Feed" ||
+      campaign.platform === "Instagram Reels" ||
+      campaign.platform === "Facebook Feed";
 
     return (
       <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -2769,20 +2833,22 @@ export default function Home() {
               Remove media
             </button>
           )}
-          {isInstagramOverlayCampaign && (
+          {isOverlayCampaign && (
             <button
               className={`btn btn-sm ${showIgFeedOverlay ? "btn-primary" : "btn-secondary"}`}
               onClick={() => setShowIgFeedOverlay((enabled) => !enabled)}
               title={
                 campaign.platform === "Instagram Reels"
                   ? "Overlay public/images/testing/overlay-reels.png"
+                  : campaign.platform === "Facebook Feed"
+                    ? "Overlay public/images/testing/overlay-facebook.png"
                   : "Overlay public/images/testing/overlay1.png"
               }
             >
               Overlay {showIgFeedOverlay ? "On" : "Off"}
             </button>
           )}
-          {isInstagramOverlayCampaign && showIgFeedOverlay && (
+          {isOverlayCampaign && showIgFeedOverlay && (
             <div
               style={{
                 display: "inline-flex",
@@ -2914,6 +2980,9 @@ export default function Home() {
                 <PreviewCanvas
                   ref={canvasRef}
                   primaryText={campaign.primaryText}
+                  facebookPageName={campaign.facebookPageName}
+                  headline={campaign.headline}
+                  url={campaign.url}
                   cta={campaign.cta}
                   ctaVisible={campaign.ctaVisible}
                   ctaBgColor={campaign.ctaBgColor}
@@ -2924,7 +2993,7 @@ export default function Home() {
                   clientVerified={client.isVerified}
                   clientAvatarUrl={client.profileImageDataUrl}
                   media={selectedMedia}
-                  instagramFeedOverlayEnabled={isInstagramOverlayCampaign && showIgFeedOverlay}
+                  instagramFeedOverlayEnabled={isOverlayCampaign && showIgFeedOverlay}
                   instagramFeedOverlayOpacity={igFeedOverlayOpacity}
                   instagramFeedOverlayScale={igFeedOverlayScale}
                   instagramFeedOverlayOffsetX={igFeedOverlayOffsetX}

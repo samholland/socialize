@@ -97,11 +97,11 @@ function drawReelsHeader(
 ) {
   const s = layout.scale;
 
-  ctx.fillStyle = "rgba(0,0,0,0.3)";
-  ctx.fillRect(layout.screen.x, layout.screen.y, layout.screen.w, 76 * s);
+  ctx.fillStyle = "rgba(0,0,0,0)";
+  ctx.fillRect(layout.screen.x, layout.screen.y, layout.screen.w, 100 * s);
   helpers.drawStoryStatusBar(ctx, layout, "light", "9:40");
 
-  const tabsY = layout.screen.y + 57 * s;
+  const tabsY = layout.screen.y + 79 * s;
 
   ctx.strokeStyle = "#ffffff";
   ctx.lineWidth = Math.max(1, 1.8 * s);
@@ -113,16 +113,16 @@ function drawReelsHeader(
   ctx.stroke();
 
   ctx.fillStyle = "#ffffff";
-  ctx.font = `700 ${17.2 * s}px ${FONT_STACK}`;
+  ctx.font = `700 ${22.5 * s}px ${FONT_STACK}`;
   ctx.fillText("Reels", layout.screen.x + 82 * s, tabsY + 6 * s);
 
   ctx.fillStyle = "rgba(255,255,255,0.68)";
-  ctx.font = `600 ${16 * s}px ${FONT_STACK}`;
+  ctx.font = `600 ${22.5 * s}px ${FONT_STACK}`;
   ctx.fillText("Friends", layout.screen.x + 153 * s, tabsY + 6 * s);
 
   for (let i = 0; i < 3; i += 1) {
     const r = 6.1 * s;
-    const cx = layout.screen.x + 250 * s + i * 10.1 * s;
+    const cx = layout.screen.x + 240 * s + i * 10.1 * s;
     const cy = tabsY - 2 * s;
     ctx.fillStyle = i === 1 ? "#c95cff" : i === 2 ? "#ff3b30" : "#f8f8f8";
     ctx.beginPath();
@@ -132,7 +132,7 @@ function drawReelsHeader(
 
   ctx.strokeStyle = "#ffffff";
   ctx.lineWidth = Math.max(1, 1.6 * s);
-  const iconX = layout.screen.x + layout.screen.w - 18 * s;
+  const iconX = layout.screen.x + layout.screen.w - 28 * s;
   const iconY = tabsY - 7 * s;
   for (let i = 0; i < 2; i += 1) {
     const y = iconY + i * 8 * s;
@@ -153,10 +153,10 @@ function drawReelsActionRail(
   helpers: ReelsRenderHelpers
 ) {
   const s = layout.scale;
-  const colX = layout.screen.x + layout.screen.w - 24 * s;
-  const startY = layout.screen.y + layout.screen.h * 0.55;
-  const iconSize = 22 * s;
-  const itemStep = 53 * s;
+  const colX = layout.screen.x + layout.screen.w - 32 * s;
+  const startY = layout.screen.y - 80 + layout.screen.h * 0.55;
+  const iconSize = 32 * s;
+  const itemStep = 67 * s;
 
   const entries: Array<{ icon: HTMLImageElement | null | undefined; count: string }> = [
     { icon: assets.heartIcon, count: "14.5K" },
@@ -176,7 +176,7 @@ function drawReelsActionRail(
       );
     } else {
       ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = Math.max(1, 1.9 * s);
+      ctx.lineWidth = Math.max(1, 2.9 * s);
       ctx.beginPath();
       ctx.moveTo(colX - 7 * s, top - 5 * s);
       ctx.lineTo(colX + 6 * s, top - 13 * s);
@@ -188,9 +188,9 @@ function drawReelsActionRail(
     }
 
     ctx.fillStyle = "rgba(255,255,255,0.92)";
-    ctx.font = `600 ${8.8 * s}px ${FONT_STACK}`;
+    ctx.font = `600 ${11 * s}px ${FONT_STACK}`;
     ctx.textAlign = "center";
-    ctx.fillText(entry.count, colX, top + 18.5 * s);
+    ctx.fillText(entry.count, colX, top + 30.5 * s);
   });
   ctx.textAlign = "left";
 }
@@ -212,74 +212,59 @@ function drawReelsFooter(
 
   const fade = ctx.createLinearGradient(0, footerTop - 68 * s, 0, footerTop);
   fade.addColorStop(0, "rgba(0,0,0,0)");
-  fade.addColorStop(1, "rgba(0,0,0,0.62)");
+  fade.addColorStop(1, "rgba(0,0,0,0.32)");
   ctx.fillStyle = fade;
   ctx.fillRect(layout.screen.x, footerTop - 68 * s, layout.screen.w, 68 * s);
 
-  ctx.fillStyle = "rgba(0,0,0,0.60)";
+  ctx.fillStyle = "rgba(0,0,0,0.30)";
   ctx.fillRect(layout.screen.x, footerTop, layout.screen.w, layout.screen.h - (footerTop - layout.screen.y));
 
   helpers.drawAvatar(
     ctx,
-    layout.screen.x + 16 * s,
-    footerTop + 15.5 * s,
-    9.8 * s,
+    layout.screen.x + 30 * s,
+    footerTop + 12 * s,
+    18 * s,
     assets.avatarImage,
     (scene.identity.clientName || "C").slice(0, 1).toUpperCase()
   );
 
   ctx.fillStyle = "#ffffff";
-  ctx.font = `700 ${10.5 * s}px ${FONT_STACK}`;
-  ctx.fillText(safeName, layout.screen.x + 30 * s, footerTop + 13 * s);
+  ctx.font = `700 ${14 * s}px ${FONT_STACK}`;
+  ctx.fillText(safeName, layout.screen.x + 58 * s, footerTop + 9 * s);
 
   ctx.fillStyle = "rgba(255,255,255,0.88)";
-  ctx.font = `500 ${8.8 * s}px ${FONT_STACK}`;
-  ctx.fillText("\u2197  dudebs \u00b7 Garden", layout.screen.x + 30 * s, footerTop + 26 * s);
+  ctx.font = `500 ${12 * s}px ${FONT_STACK}`;
+  ctx.fillText("\u2197  dudebs \u00b7 Garden", layout.screen.x + 58 * s, footerTop + 26 * s);
 
-  ctx.strokeStyle = "rgba(255,255,255,0.9)";
-  helpers.strokeRoundedRect(
-    ctx,
-    {
-      x: layout.screen.x + 124 * s,
-      y: footerTop + 2 * s,
-      w: 56 * s,
-      h: 22 * s,
-    },
-    10 * s,
-    Math.max(1, 1.6 * s)
-  );
-  ctx.fillStyle = "#ffffff";
-  ctx.font = `700 ${10 * s}px ${FONT_STACK}`;
-  ctx.fillText("Follow", layout.screen.x + 140 * s, footerTop + 16 * s);
 
   drawMoreIcon(
     ctx,
-    layout.screen.x + layout.screen.w - 21 * s,
-    footerTop + 12 * s,
-    1.5 * s,
+    layout.screen.x + layout.screen.w - 35 * s,
+    footerTop + 6 * s,
+    2 * s,
     "#ffffff"
   );
 
   ctx.fillStyle = "rgba(255,255,255,0.92)";
-  ctx.font = `500 ${8.8 * s}px ${FONT_STACK}`;
+  ctx.font = `500 ${14 * s}px ${FONT_STACK}`;
   helpers.drawWrappedText(
     ctx,
     scene.textLayer.primaryText || "Write your campaign copy here.",
-    layout.screen.x + 14 * s,
-    footerTop + 46 * s,
+    layout.screen.x + 12 * s,
+    footerTop + 56 * s,
     layout.screen.w - 66 * s,
     1,
     11 * s
   );
 
   const thumbRect = {
-    x: layout.screen.x + layout.screen.w - 30 * s,
-    y: footerTop + 31 * s,
-    w: 18 * s,
-    h: 18 * s,
+    x: layout.screen.x + layout.screen.w - 44 * s,
+    y: footerTop + 36 * s,
+    w: 26 * s,
+    h: 26 * s,
   };
   ctx.fillStyle = "rgba(255,255,255,0.14)";
-  helpers.fillRoundedRect(ctx, thumbRect, 4 * s);
+  helpers.fillRoundedRect(ctx, thumbRect, 8 * s);
   if (assets.mediaImage) {
     helpers.drawCover(
       ctx,
@@ -291,7 +276,7 @@ function drawReelsFooter(
     );
   }
   ctx.strokeStyle = "rgba(255,255,255,0.75)";
-  helpers.strokeRoundedRect(ctx, thumbRect, 4 * s, Math.max(1, 1.2 * s));
+  helpers.strokeRoundedRect(ctx, thumbRect, 4 * s, Math.max(1, 2.2 * s));
 
   const navY = layout.screen.y + layout.screen.h - navH;
   ctx.fillStyle = "rgba(4,12,24,0.94)";
@@ -353,7 +338,7 @@ export function renderInstagramReelsSurface({
     layout.screen.x,
     layout.screen.y + 160 * layout.scale
   );
-  topFade.addColorStop(0, "rgba(0,0,0,0.42)");
+  topFade.addColorStop(0, "rgba(0,0,0,0.12)");
   topFade.addColorStop(1, "rgba(0,0,0,0)");
   ctx.fillStyle = topFade;
   ctx.fillRect(layout.screen.x, layout.screen.y, layout.screen.w, 160 * layout.scale);

@@ -11,7 +11,6 @@ import {
   drawFeedStatusBar,
   drawMoreIcon,
   drawVerifiedBadge,
-  drawWrappedText,
   endClip,
   mediaHeightForAspect,
 } from "./shared";
@@ -113,6 +112,82 @@ function drawCaptionBlock(
     ctx.font = `500 ${12.5 * scale}px ${FONT_STACK}`;
     ctx.fillText(line.text, x, lineY);
   });
+}
+
+function facebookDomainLabel(rawUrl: string, fallbackName: string): string {
+  const trimmed = rawUrl.trim();
+  if (!trimmed) {
+    return `${fallbackName.toLowerCase().replace(/[^a-z0-9]+/g, "") || "brand"}.com`;
+  }
+
+  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const host = new URL(withScheme).hostname.replace(/^www\./i, "");
+    if (host) return host;
+  } catch {
+    // Fall through to permissive parsing.
+  }
+
+  const simplified = trimmed
+    .replace(/^https?:\/\//i, "")
+    .replace(/^www\./i, "")
+    .split("/")[0]
+    .trim();
+  return simplified || `${fallbackName.toLowerCase().replace(/[^a-z0-9]+/g, "") || "brand"}.com`;
+}
+
+function drawUntruncatedWrappedText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  lineHeight: number
+): number {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return 0;
+
+  const lines: string[] = [];
+  let current = words[0];
+
+  for (let i = 1; i < words.length; i += 1) {
+    const candidate = `${current} ${words[i]}`;
+    if (ctx.measureText(candidate).width <= maxWidth) {
+      current = candidate;
+    } else {
+      lines.push(current);
+      current = words[i];
+    }
+  }
+  lines.push(current);
+
+  lines.forEach((line, index) => {
+    ctx.fillText(line, x, y + index * lineHeight);
+  });
+
+  return lines.length;
+}
+
+function wrappedLineCount(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number
+): number {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return 0;
+
+  let lines = 1;
+  let current = words[0];
+  for (let i = 1; i < words.length; i += 1) {
+    const candidate = `${current} ${words[i]}`;
+    if (ctx.measureText(candidate).width <= maxWidth) {
+      current = candidate;
+    } else {
+      lines += 1;
+      current = words[i];
+    }
+  }
+  return lines;
 }
 
 async function drawInstagramFeedSurface(args: DrawFeedSurfaceArgs) {
@@ -285,112 +360,16 @@ async function drawInstagramFeedSurface(args: DrawFeedSurfaceArgs) {
   endClip(ctx);
 }
 
-function drawFacebookTopBar(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, s: number) {
-  const topH = 46 * s;
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(x, y, w, topH);
-
-  ctx.fillStyle = "#1877f2";
-  ctx.font = `700 ${14 * s}px ${FONT_STACK}`;
-  ctx.fillText("facebook", x + 14 * s, y + 29 * s);
-
-  const iconY = y + topH / 2;
-  const iconSize = 14 * s;
-  for (let i = 0; i < 3; i += 1) {
-    const cx = x + w - (19 + i * 22) * s;
-    ctx.fillStyle = "#f0f2f5";
-    ctx.beginPath();
-    ctx.arc(cx, iconY, 9 * s, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.strokeStyle = "#202124";
-    ctx.lineWidth = Math.max(1, 1.5 * s);
-    ctx.beginPath();
-    if (i === 0) {
-      ctx.moveTo(cx - iconSize * 0.2, iconY);
-      ctx.lineTo(cx + iconSize * 0.2, iconY);
-      ctx.moveTo(cx, iconY - iconSize * 0.2);
-      ctx.lineTo(cx, iconY + iconSize * 0.2);
-    } else if (i === 1) {
-      ctx.arc(cx - 1 * s, iconY - 1 * s, 3.2 * s, 0, Math.PI * 2);
-      ctx.moveTo(cx + 3 * s, iconY + 3 * s);
-      ctx.lineTo(cx + 6 * s, iconY + 6 * s);
-    } else {
-      fillRoundedRect(ctx, { x: cx - 5 * s, y: iconY - 3.8 * s, w: 10 * s, h: 8 * s }, 2 * s);
-      ctx.fillStyle = "#f0f2f5";
-      ctx.beginPath();
-      ctx.moveTo(cx - 1 * s, iconY + 4 * s);
-      ctx.lineTo(cx + 2 * s, iconY + 3 * s);
-      ctx.lineTo(cx + 0 * s, iconY + 1 * s);
-      ctx.closePath();
-      ctx.fill();
-      ctx.strokeStyle = "#202124";
-      ctx.beginPath();
-      ctx.rect(cx - 4 * s, iconY - 2.6 * s, 8 * s, 5.2 * s);
-    }
-    ctx.stroke();
-  }
-
-  ctx.fillStyle = "#e6e8ec";
-  ctx.fillRect(x, y + topH - 1 * s, w, 1 * s);
-}
-
-function drawFacebookTabBar(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, s: number) {
-  const tabH = 34 * s;
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(x, y, w, tabH);
-
-  const labels = ["Home", "Reels", "Friends", "Groups", "Notifs"];
-  const step = w / labels.length;
-  labels.forEach((label, i) => {
-    const cx = x + step * (i + 0.5);
-    const active = i === 0;
-    ctx.fillStyle = active ? "#1877f2" : "#65676b";
-    ctx.font = `${active ? 700 : 500} ${7.2 * s}px ${FONT_STACK}`;
-    ctx.textAlign = "center";
-    ctx.fillText(label, cx, y + 22 * s);
-    if (active) {
-      ctx.fillRect(cx - 16 * s, y + tabH - 2 * s, 32 * s, 2 * s);
-    }
-  });
-  ctx.textAlign = "left";
-
-  ctx.fillStyle = "#e6e8ec";
-  ctx.fillRect(x, y + tabH - 1 * s, w, 1 * s);
-}
-
-function drawFacebookBottomNav(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  s: number
-) {
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(x, y, w, h);
-  ctx.fillStyle = "#e6e8ec";
-  ctx.fillRect(x, y, w, 1 * s);
-
-  const step = w / 5;
-  for (let i = 0; i < 5; i += 1) {
-    const cx = x + step * (i + 0.5);
-    ctx.fillStyle = i === 0 ? "#1877f2" : "#65676b";
-    ctx.beginPath();
-    ctx.arc(cx, y + h / 2, 6 * s, 0, Math.PI * 2);
-    ctx.fill();
-  }
-}
-
 async function drawFacebookFeedSurface(args: DrawFeedSurfaceArgs) {
   const {
     ctx,
     layout,
     mediaAspect,
     primaryText,
+    facebookPageName,
+    headline,
+    url,
     cta,
-    ctaBgColor,
-    ctaTextColor,
     clientName,
     clientVerified,
     clientAvatarUrl,
@@ -399,130 +378,134 @@ async function drawFacebookFeedSurface(args: DrawFeedSurfaceArgs) {
 
   const s = layout.scale;
   const screen = layout.screen;
-  const navH = 44 * s;
 
   clipScreen(ctx, layout);
 
-  ctx.fillStyle = "#f0f2f5";
+  ctx.fillStyle = "#ffffff";
   ctx.fillRect(screen.x, screen.y, screen.w, screen.h);
 
-  drawFacebookTopBar(ctx, screen.x, screen.y, screen.w, s);
-  drawFacebookTabBar(ctx, screen.x, screen.y + 46 * s, screen.w, s);
+  const cardX = screen.x;
+  const cardW = screen.w;
+  let y = screen.y + 40 * s;
+  const headerH = 56 * s;
 
-  const cardX = screen.x + 8 * s;
-  const cardW = screen.w - 16 * s;
-  const contentTop = screen.y + 86 * s;
-
-  ctx.fillStyle = "#ffffff";
-  fillRoundedRect(
-    ctx,
-    {
-      x: cardX,
-      y: contentTop,
-      w: cardW,
-      h: screen.h - (contentTop - screen.y) - navH - 10 * s,
-    },
-    7 * s
-  );
-
-  const headerY = contentTop + 14 * s;
   await drawAvatarCircle(
     ctx,
-    cardX + 16 * s,
-    headerY + 10 * s,
-    10 * s,
+    cardX + 24 * s,
+    y + 33 * s,
+    18 * s,
     clientName,
     clientAvatarUrl,
     loadImageFromUrl
   );
 
-  const displayName = fitText(clientName || "Brand", 24);
-  const nameX = cardX + 32 * s;
-  const nameY = headerY + 8 * s;
+  const displayName = fitText((facebookPageName || clientName || " ").trim(), 26);
+  const nameX = cardX + 49 * s;
+  const nameY = y + 32 * s;
   ctx.fillStyle = "#1d2129";
-  ctx.font = `700 ${8.4 * s}px ${FONT_STACK}`;
+  ctx.font = `600 ${14.5 * s}px ${FONT_STACK}`;
   ctx.fillText(displayName, nameX, nameY);
 
   if (clientVerified) {
     const nameW = ctx.measureText(displayName).width;
-    drawVerifiedBadge(ctx, nameX + nameW + 3 * s, nameY - 6.5 * s, 7 * s);
+    drawVerifiedBadge(ctx, nameX + nameW + 4 * s, nameY - 8 * s, 8.2 * s);
   }
 
   ctx.fillStyle = "#65676b";
-  ctx.font = `500 ${7 * s}px ${FONT_STACK}`;
-  ctx.fillText("Sponsored · Public", nameX, headerY + 18 * s);
+  ctx.font = `500 ${11.5 * s}px ${FONT_STACK}`;
+  ctx.fillText("Sponsored ·", nameX, y + 47 * s);
+  ctx.beginPath();
+  ctx.arc(nameX + 72 * s, y + 43 * s, 3 * s, 0, Math.PI * 2);
+  ctx.strokeStyle = "#65676b";
+  ctx.lineWidth = Math.max(1, 2.2 * s);
+  ctx.stroke();
 
-  drawMoreIcon(ctx, cardX + cardW - 20 * s, headerY + 10 * s, 1.5 * s, "#8a8d91");
+  drawMoreIcon(ctx, cardX + cardW - 33 * s, y + 16 * s, 1.6 * s, "#8a8d91");
+  ctx.fillStyle = "#8a8d91";
+  ctx.font = `500 ${15 * s}px ${FONT_STACK}`;
+  ctx.fillText("×", cardX + cardW - 15 * s, y + 18 * s);
 
-  let y = headerY + 28 * s;
+  y += headerH;
 
-  if (primaryText.trim()) {
+  const bodyCopy = primaryText.trim();
+  if (bodyCopy) {
     ctx.fillStyle = "#1d2129";
-    ctx.font = `500 ${8 * s}px ${FONT_STACK}`;
-    drawWrappedText(ctx, primaryText, cardX + 8 * s, y, cardW - 16 * s, 3, 12 * s);
-    y += 38 * s;
+    ctx.font = `500 ${14 * s}px ${FONT_STACK}`;
+    const bodyLineHeight = 18 * s;
+    const bodyLines = drawUntruncatedWrappedText(
+      ctx,
+      bodyCopy,
+      cardX + 10 * s,
+      y + 16 * s,
+      cardW - 20 * s,
+      bodyLineHeight
+    );
+    y += bodyLines * bodyLineHeight + 10 * s;
+  } else {
+    y += 8 * s;
   }
 
-  const footerH = navH + 80 * s;
-  const mediaMaxH = Math.max(120 * s, screen.y + screen.h - footerH - y - 4 * s);
+  const reservedBelow = 178 * s;
+  const mediaMaxH = Math.max(120 * s, screen.y + screen.h - y - reservedBelow);
   const mediaTargetH = mediaHeightForAspect(cardW, mediaAspect);
   const mediaH = Math.min(mediaMaxH, mediaTargetH);
   const mediaRect = { x: cardX, y, w: cardW, h: mediaH };
 
   await drawFeedMedia(args, mediaRect, "Drop media");
 
+
+
   y += mediaH;
 
-  const ctaH = 42 * s;
+  const buttonText = fitText((cta || "Get quote").trim() || "Get quote", 18);
+  ctx.font = `700 ${13 * s}px ${FONT_STACK}`;
+  const btnW = Math.max(76 * s, ctx.measureText(buttonText).width + 16 * s);
+  const headlineText = (headline || displayName).trim() || displayName;
+  const headlineX = cardX + 8 * s;
+  const headlineTop = y + 40 * s;
+  const headlineLineHeight = 16 * s;
+  const headlineMaxWidth = Math.max(80 * s, cardW - btnW - 26 * s);
+  ctx.font = `700 ${14 * s}px ${FONT_STACK}`;
+  const headlineLines = Math.max(1, wrappedLineCount(ctx, headlineText, headlineMaxWidth));
+  const headlineBottom = headlineTop + (headlineLines - 1) * headlineLineHeight + 3 * s;
+  const ctaH = Math.max(56 * s, headlineBottom - y + 11 * s);
   ctx.fillStyle = "#f0f2f5";
   ctx.fillRect(cardX, y, cardW, ctaH);
 
   ctx.fillStyle = "#65676b";
-  ctx.font = `600 ${6.4 * s}px ${FONT_STACK}`;
-  const domain = `${displayName.toLowerCase().replace(/[^a-z0-9]+/g, "") || "brand"}.com`;
-  ctx.fillText(domain, cardX + 8 * s, y + 14 * s);
+  ctx.font = `600 ${11 * s}px ${FONT_STACK}`;
+  const domain = fitText(facebookDomainLabel(url, displayName), 34);
+  ctx.fillText(domain, cardX + 8 * s, y + 20 * s);
 
   ctx.fillStyle = "#1d2129";
-  ctx.font = `700 ${7.6 * s}px ${FONT_STACK}`;
-  ctx.fillText(fitText(primaryText || displayName, 34), cardX + 8 * s, y + 27 * s);
+  ctx.font = `700 ${14 * s}px ${FONT_STACK}`;
+  drawUntruncatedWrappedText(ctx, headlineText, headlineX, headlineTop, headlineMaxWidth, headlineLineHeight);
 
-  const btnW = Math.max(72 * s, ctx.measureText(cta || "Learn More").width + 20 * s);
-  const btnH = 18 * s;
+  const btnH = 32 * s;
   const btnX = cardX + cardW - btnW - 8 * s;
   const btnY = y + (ctaH - btnH) / 2;
-  ctx.fillStyle = ctaBgColor;
-  fillRoundedRect(ctx, { x: btnX, y: btnY, w: btnW, h: btnH }, 5 * s);
+  ctx.fillStyle = "#dfe1e5";
+  fillRoundedRect(ctx, { x: btnX, y: btnY, w: btnW, h: btnH }, 6 * s);
 
-  ctx.fillStyle = ctaTextColor;
-  ctx.font = `700 ${7.2 * s}px ${FONT_STACK}`;
+  ctx.fillStyle = "#34363a";
   ctx.textAlign = "center";
-  ctx.fillText(fitText(cta || "Learn More", 14), btnX + btnW / 2, btnY + 9 * s);
+  ctx.fillText(buttonText, btnX + btnW / 2, btnY + 20 * s);
   ctx.textAlign = "left";
 
   y += ctaH;
 
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(cardX, y, cardW, 28 * s);
   ctx.fillStyle = "#65676b";
-  ctx.font = `500 ${7 * s}px ${FONT_STACK}`;
-  ctx.fillText("👍 2.1K   ·   48 comments", cardX + 8 * s, y + 15 * s);
-
-  y += 22 * s;
-
-  ctx.fillStyle = "#e6e8ec";
-  ctx.fillRect(cardX + 8 * s, y, cardW - 16 * s, 1 * s);
-  y += 1 * s;
-
-  const actionLabels = ["Like", "Comment", "Share"];
-  const actionStep = cardW / actionLabels.length;
-  actionLabels.forEach((label, index) => {
-    const left = cardX + actionStep * index;
-    ctx.fillStyle = "#1d2129";
-    ctx.font = `600 ${7.4 * s}px ${FONT_STACK}`;
-    ctx.textAlign = "center";
-    ctx.fillText(label, left + actionStep / 2, y + 16 * s);
-  });
-  ctx.textAlign = "left";
-
-  drawFacebookBottomNav(ctx, screen.x, screen.y + screen.h - navH, screen.w, navH, s);
+  ctx.font = `500 ${9.2 * s}px ${FONT_STACK}`;
+  ctx.fillText("👍 8.6K    💬 3.7K    ↩", cardX + 8 * s, y + 18 * s);
+  ctx.fillStyle = "#2f73ff";
+  ctx.beginPath();
+  ctx.arc(cardX + cardW - 12 * s, y + 14 * s, 4.2 * s, 0, Math.PI * 2);
+  ctx.fill();
+  y += 28 * s;
+  ctx.fillStyle = "#f2f3f5";
+  ctx.fillRect(cardX, y, cardW, 1 * s);
 
   endClip(ctx);
 }
