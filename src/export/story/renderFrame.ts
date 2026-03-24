@@ -1,140 +1,29 @@
 import {
   FONT_STACK,
-  FRAME_NATIVE,
   STORY_LAYOUT,
-  STORY_VIDEO_EXPORT,
-  SCREEN_NATIVE,
 } from "./constants";
+import {
+  alphaHex,
+  drawCover,
+  drawTintedImage,
+  drawWrappedText,
+  fillRoundedRect,
+  fitText,
+  normalizeHexColor,
+  roundedRectPath,
+  strokeRoundedRect,
+} from "@/rendering/core/primitives";
+import { renderInstagramStorySurface } from "./renderers/renderInstagramStorySurface";
+import { renderInstagramReelsSurface } from "./renderers/renderInstagramReelsSurface";
+import { renderTikTokSurface } from "./renderers/renderTikTokSurface";
+import type { StorySceneModel } from "./sceneModel";
 import type {
   StoryExportAssets,
-  StoryExportScene,
   StoryFrameMediaSource,
 } from "./types";
 
 type Rect = { x: number; y: number; w: number; h: number };
-type Layout = { frame: Rect; screen: Rect; screenRadius: number };
-
-function roundedRectPath(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r: number
-) {
-  const radius = Math.max(0, Math.min(r, Math.min(w, h) / 2));
-  ctx.beginPath();
-  ctx.moveTo(x + radius, y);
-  ctx.arcTo(x + w, y, x + w, y + h, radius);
-  ctx.arcTo(x + w, y + h, x, y + h, radius);
-  ctx.arcTo(x, y + h, x, y, radius);
-  ctx.arcTo(x, y, x + w, y, radius);
-  ctx.closePath();
-}
-
-function fillRoundedRect(ctx: CanvasRenderingContext2D, rect: Rect, r: number) {
-  roundedRectPath(ctx, rect.x, rect.y, rect.w, rect.h, r);
-  ctx.fill();
-}
-
-function strokeRoundedRect(
-  ctx: CanvasRenderingContext2D,
-  rect: Rect,
-  r: number,
-  lineWidth: number
-) {
-  roundedRectPath(ctx, rect.x, rect.y, rect.w, rect.h, r);
-  ctx.lineWidth = lineWidth;
-  ctx.stroke();
-}
-
-function fitText(text: string, maxChars: number): string {
-  const trimmed = text.trim();
-  if (!trimmed) return "";
-  if (trimmed.length <= maxChars) return trimmed;
-  return `${trimmed.slice(0, Math.max(0, maxChars - 1))}...`;
-}
-
-function drawWrappedText(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  x: number,
-  y: number,
-  maxWidth: number,
-  maxLines: number,
-  lineHeight: number
-) {
-  const words = text.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return;
-
-  const lines: string[] = [];
-  let current = words[0];
-
-  for (let i = 1; i < words.length; i += 1) {
-    const candidate = `${current} ${words[i]}`;
-    if (ctx.measureText(candidate).width <= maxWidth) {
-      current = candidate;
-      continue;
-    }
-
-    lines.push(current);
-    current = words[i];
-    if (lines.length === maxLines - 1) break;
-  }
-
-  if (lines.length < maxLines) lines.push(current);
-
-  const consumedWords = lines.join(" ").split(/\s+/).filter(Boolean).length;
-  if (consumedWords < words.length) {
-    const lastIndex = Math.min(maxLines - 1, lines.length - 1);
-    let line = lines[lastIndex] ?? "";
-    while (line.length > 0 && ctx.measureText(`${line}...`).width > maxWidth) {
-      line = line.slice(0, -1);
-    }
-    lines[lastIndex] = `${line}...`;
-  }
-
-  lines.forEach((line, index) => {
-    ctx.fillText(line, x, y + index * lineHeight);
-  });
-}
-
-function drawCover(
-  ctx: CanvasRenderingContext2D,
-  source: CanvasImageSource,
-  srcW: number,
-  srcH: number,
-  dest: Rect,
-  zoom: number
-) {
-  const scale = Math.max(dest.w / srcW, dest.h / srcH) * zoom;
-  const sw = dest.w / scale;
-  const sh = dest.h / scale;
-  const sx = (srcW - sw) / 2;
-  const sy = (srcH - sh) / 2;
-  ctx.drawImage(source, sx, sy, sw, sh, dest.x, dest.y, dest.w, dest.h);
-}
-
-function drawTintedImage(
-  ctx: CanvasRenderingContext2D,
-  image: HTMLImageElement,
-  rect: Rect,
-  color: string
-) {
-  const width = Math.max(1, Math.round(rect.w));
-  const height = Math.max(1, Math.round(rect.h));
-  const offscreen = document.createElement("canvas");
-  offscreen.width = width;
-  offscreen.height = height;
-  const offscreenCtx = offscreen.getContext("2d");
-  if (!offscreenCtx) return;
-
-  offscreenCtx.drawImage(image, 0, 0, width, height);
-  offscreenCtx.globalCompositeOperation = "source-in";
-  offscreenCtx.fillStyle = color;
-  offscreenCtx.fillRect(0, 0, width, height);
-  ctx.drawImage(offscreen, rect.x, rect.y, rect.w, rect.h);
-}
+type Layout = { frame: Rect; screen: Rect; screenRadius: number; scale: number };
 
 function drawAvatar(
   ctx: CanvasRenderingContext2D,
@@ -179,30 +68,113 @@ function drawAvatar(
   ctx.stroke();
 }
 
-function computeLayout(): Layout {
+function computeLayout(scene: StorySceneModel): Layout {
+  const { frameNative, screenNative } = scene.geometry;
+  const { width: outputW, height: outputH } = scene.coordinateSpace;
   const frameW = 860;
-  const frameH = Math.round((frameW * FRAME_NATIVE.h) / FRAME_NATIVE.w);
+  const frameH = Math.round((frameW * frameNative.h) / frameNative.w);
   const frame = {
-    x: (STORY_VIDEO_EXPORT.width - frameW) / 2,
-    y: (STORY_VIDEO_EXPORT.height - frameH) / 2,
+    x: (outputW - frameW) / 2,
+    y: (outputH - frameH) / 2,
     w: frameW,
     h: frameH,
   };
   const screen = {
-    x: frame.x + frame.w * (SCREEN_NATIVE.x / FRAME_NATIVE.w),
-    y: frame.y + frame.h * (SCREEN_NATIVE.y / FRAME_NATIVE.h),
-    w: frame.w * (SCREEN_NATIVE.w / FRAME_NATIVE.w),
-    h: frame.h * (SCREEN_NATIVE.h / FRAME_NATIVE.h),
+    x: frame.x + frame.w * (screenNative.x / frameNative.w),
+    y: frame.y + frame.h * (screenNative.y / frameNative.h),
+    w: frame.w * (screenNative.w / frameNative.w),
+    h: frame.h * (screenNative.h / frameNative.h),
   };
   const scale = screen.w / 364;
-  return { frame, screen, screenRadius: 42 * scale };
+  return { frame, screen, screenRadius: 42 * scale, scale };
 }
 
-function normalizeHexColor(value: string | undefined, fallback: string): string {
-  if (typeof value !== "string") return fallback;
-  const trimmed = value.trim();
-  if (/^#[0-9a-fA-F]{6}$/.test(trimmed)) return trimmed.toLowerCase();
-  return fallback;
+function drawStoryStatusBar(
+  ctx: CanvasRenderingContext2D,
+  layout: Layout,
+  tone: "light" | "dark",
+  timeLabel = "12:13"
+) {
+  const s = layout.scale;
+  const fg = tone === "light" ? "#ffffff" : "#1f2430";
+  const muted = tone === "light" ? "rgba(255,255,255,0.35)" : alphaHex(fg, 0.28);
+  const timeX = layout.screen.x + 38 * s;
+  const timeY = layout.screen.y + 34 * s;
+  const batteryW = 28 * s;
+  const batteryH = 14 * s;
+  const batteryX = layout.screen.x + layout.screen.w - 58 * s;
+  const batteryY = layout.screen.y + 17 * s;
+  const capW = 2.5 * s;
+  const capH = 5 * s;
+  const signalRight = batteryX - 10 * s;
+  const signalBaseY = batteryY + batteryH - 1.5 * s;
+  const barW = 4 * s;
+  const barGap = 2.5 * s;
+  const barHeights = [7, 10, 13, 16].map((value) => value * s);
+
+  ctx.fillStyle = fg;
+  ctx.font = `600 ${16 * s}px ${FONT_STACK}`;
+  ctx.fillText(timeLabel, timeX, timeY);
+
+  barHeights.forEach((height, index) => {
+    const x =
+      signalRight - (barHeights.length - index) * barW - (barHeights.length - 1 - index) * barGap;
+    ctx.fillStyle = index === barHeights.length - 1 ? muted : fg;
+    fillRoundedRect(
+      ctx,
+      {
+        x,
+        y: signalBaseY - height,
+        w: barW,
+        h: height,
+      },
+      1.4 * s
+    );
+  });
+
+  ctx.strokeStyle = fg;
+  strokeRoundedRect(
+    ctx,
+    {
+      x: batteryX,
+      y: batteryY,
+      w: batteryW,
+      h: batteryH,
+    },
+    6 * s,
+    Math.max(1, 1.6 * s)
+  );
+
+  ctx.fillStyle = muted;
+  fillRoundedRect(
+    ctx,
+    {
+      x: batteryX + 2.5 * s,
+      y: batteryY + 2.5 * s,
+      w: batteryW - 7 * s,
+      h: batteryH - 5 * s,
+    },
+    3 * s
+  );
+
+  ctx.fillStyle = fg;
+  fillRoundedRect(
+    ctx,
+    {
+      x: batteryX + 2.5 * s,
+      y: batteryY + 2.5 * s,
+      w: batteryW - 7 * s,
+      h: batteryH - 5 * s,
+    },
+    3 * s
+  );
+
+  ctx.fillRect(
+    batteryX + batteryW + 1.8 * s,
+    batteryY + (batteryH - capH) / 2,
+    capW,
+    capH
+  );
 }
 
 function drawStoryCtaPill(
@@ -246,6 +218,24 @@ function drawStoryCtaPill(
   ctx.restore();
 }
 
+function drawStoryCtaBar(
+  ctx: CanvasRenderingContext2D,
+  layout: Layout,
+  rect: Rect,
+  ctaText: string,
+  bgColor: string,
+  textColor: string
+) {
+  const s = layout.scale;
+  ctx.fillStyle = normalizeHexColor(bgColor, "#4f94aa");
+  fillRoundedRect(ctx, rect, 0);
+
+  ctx.fillStyle = normalizeHexColor(textColor, "#ffffff");
+  ctx.font = `700 ${16 * s}px ${FONT_STACK}`;
+  ctx.fillText(fitText(ctaText || "Learn More", 16), rect.x + 12 * s, rect.y + rect.h * 0.68);
+  ctx.fillText(">", rect.x + rect.w - 21 * s, rect.y + rect.h * 0.74);
+}
+
 function drawFallbackActionIcon(ctx: CanvasRenderingContext2D, x: number, y: number, size: number) {
   ctx.strokeStyle = "#fff";
   ctx.lineWidth = Math.max(1, size * 0.09);
@@ -254,27 +244,138 @@ function drawFallbackActionIcon(ctx: CanvasRenderingContext2D, x: number, y: num
   ctx.stroke();
 }
 
-export function renderStoryExportFrame(
+function drawStoryMedia(
   ctx: CanvasRenderingContext2D,
-  scene: StoryExportScene,
+  mediaRect: Rect,
+  assets: StoryExportAssets,
+  mediaSource: StoryFrameMediaSource | undefined,
+  elapsedMs: number,
+  durationMs: number
+) {
+  if (mediaSource && mediaSource.width > 0 && mediaSource.height > 0) {
+    drawCover(
+      ctx,
+      mediaSource.source,
+      mediaSource.width,
+      mediaSource.height,
+      mediaRect,
+      mediaSource.zoom ?? 1
+    );
+    return;
+  }
+
+  if (assets.mediaImage) {
+    const t = Math.max(0, Math.min(1, elapsedMs / Math.max(1, durationMs)));
+    const zoom = 1 + t * 0.015;
+    drawCover(
+      ctx,
+      assets.mediaImage,
+      assets.mediaImage.naturalWidth,
+      assets.mediaImage.naturalHeight,
+      mediaRect,
+      zoom
+    );
+    return;
+  }
+
+  ctx.fillStyle = "#222";
+  ctx.fillRect(mediaRect.x, mediaRect.y, mediaRect.w, mediaRect.h);
+}
+
+function drawInstagramStorySurface(
+  ctx: CanvasRenderingContext2D,
+  scene: StorySceneModel,
+  layout: Layout,
   assets: StoryExportAssets,
   elapsedMs: number,
   durationMs: number,
   mediaSource?: StoryFrameMediaSource
 ) {
-  const layout = computeLayout();
+  renderInstagramStorySurface({
+    ctx,
+    scene,
+    layout,
+    assets,
+    elapsedMs,
+    durationMs,
+    mediaSource,
+    helpers: {
+      drawStoryMedia,
+      drawAvatar,
+      drawWrappedText,
+      fillRoundedRect,
+      drawTintedImage,
+      drawFallbackActionIcon,
+      drawStoryCtaPill,
+      fitText,
+    },
+  });
+}
 
-  ctx.clearRect(0, 0, STORY_VIDEO_EXPORT.width, STORY_VIDEO_EXPORT.height);
+function drawShortVideoSurface(
+  ctx: CanvasRenderingContext2D,
+  scene: StorySceneModel,
+  layout: Layout,
+  assets: StoryExportAssets,
+  elapsedMs: number,
+  durationMs: number,
+  mediaSource?: StoryFrameMediaSource
+) {
+  if (scene.surface === "instagram-reels") {
+    renderInstagramReelsSurface({
+      ctx,
+      scene,
+      layout,
+      assets,
+      elapsedMs,
+      durationMs,
+      mediaSource,
+      helpers: {
+        drawStoryStatusBar,
+        drawStoryMedia,
+        drawTintedImage,
+        drawAvatar,
+        drawWrappedText,
+        fillRoundedRect,
+        strokeRoundedRect,
+        drawCover,
+        fitText,
+      },
+    });
+    return;
+  }
+  renderTikTokSurface({
+    ctx,
+    scene,
+    layout,
+    assets,
+    elapsedMs,
+    durationMs,
+    mediaSource,
+    helpers: {
+      drawStoryStatusBar,
+      drawStoryMedia,
+      drawWrappedText,
+      fillRoundedRect,
+      drawStoryCtaBar,
+    },
+  });
+}
+
+export function renderStoryExportFrame(
+  ctx: CanvasRenderingContext2D,
+  scene: StorySceneModel,
+  assets: StoryExportAssets,
+  elapsedMs: number,
+  durationMs: number,
+  mediaSource?: StoryFrameMediaSource
+) {
+  const layout = computeLayout(scene);
+  const { width: outputW, height: outputH } = scene.coordinateSpace;
+
+  ctx.clearRect(0, 0, outputW, outputH);
   ctx.fillStyle = "#d8dbe0";
-  ctx.fillRect(0, 0, STORY_VIDEO_EXPORT.width, STORY_VIDEO_EXPORT.height);
-
-  const domWrapperW = 340;
-  const domWrapperH = Math.round((domWrapperW * FRAME_NATIVE.h) / FRAME_NATIVE.w);
-  const domScreenW = domWrapperW * 0.6402;
-  const domScreenH = domWrapperH * 0.8609;
-  const sx = layout.screen.w / domScreenW;
-  const sy = layout.screen.h / domScreenH;
-  const ss = Math.min(sx, sy);
+  ctx.fillRect(0, 0, outputW, outputH);
 
   ctx.save();
   roundedRectPath(
@@ -287,158 +388,10 @@ export function renderStoryExportFrame(
   );
   ctx.clip();
 
-  ctx.fillStyle = "#111111";
-  ctx.fillRect(layout.screen.x, layout.screen.y, layout.screen.w, layout.screen.h);
-
-  const mediaRect: Rect = {
-    x: layout.screen.x,
-    y: layout.screen.y + STORY_LAYOUT.mediaTop * sy,
-    w: layout.screen.w,
-    h: layout.screen.h - (STORY_LAYOUT.mediaTop + STORY_LAYOUT.mediaBottom) * sy,
-  };
-
-  if (mediaSource && mediaSource.width > 0 && mediaSource.height > 0) {
-    drawCover(
-      ctx,
-      mediaSource.source,
-      mediaSource.width,
-      mediaSource.height,
-      mediaRect,
-      mediaSource.zoom ?? 1
-    );
-  } else if (assets.mediaImage) {
-    const t = Math.max(0, Math.min(1, elapsedMs / Math.max(1, durationMs)));
-    const zoom = 1 + t * 0.015;
-    drawCover(
-      ctx,
-      assets.mediaImage,
-      assets.mediaImage.naturalWidth,
-      assets.mediaImage.naturalHeight,
-      mediaRect,
-      zoom
-    );
+  if (scene.surface === "instagram-story") {
+    drawInstagramStorySurface(ctx, scene, layout, assets, elapsedMs, durationMs, mediaSource);
   } else {
-    ctx.fillStyle = "#222";
-    ctx.fillRect(mediaRect.x, mediaRect.y, mediaRect.w, mediaRect.h);
-  }
-
-  const topFade = ctx.createLinearGradient(
-    layout.screen.x,
-    layout.screen.y,
-    layout.screen.x,
-    layout.screen.y + STORY_LAYOUT.topGradientHeight * sy
-  );
-  topFade.addColorStop(0, "rgba(0,0,0,0.24)");
-  topFade.addColorStop(0.42, "rgba(0,0,0,0.12)");
-  topFade.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = topFade;
-  ctx.fillRect(
-    layout.screen.x,
-    layout.screen.y,
-    layout.screen.w,
-    STORY_LAYOUT.topGradientHeight * sy
-  );
-
-  const barGap = STORY_LAYOUT.progressGap * sx;
-  const barX = layout.screen.x + STORY_LAYOUT.progressLeftRight * sx;
-  const barY = layout.screen.y + STORY_LAYOUT.progressTop * sy;
-  const barW = (layout.screen.w - STORY_LAYOUT.progressLeftRight * 2 * sx - barGap * 3) / 4;
-  for (let i = 0; i < 4; i += 1) {
-    ctx.fillStyle = i < 2 ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.25)";
-    fillRoundedRect(
-      ctx,
-      {
-        x: barX + i * (barW + barGap),
-        y: barY,
-        w: barW,
-        h: STORY_LAYOUT.progressHeight * sy,
-      },
-      sy
-    );
-  }
-
-  drawAvatar(
-    ctx,
-    layout.screen.x + STORY_LAYOUT.avatarCenterX * sx,
-    layout.screen.y + STORY_LAYOUT.avatarCenterY * sy,
-    STORY_LAYOUT.avatarRadius * ss,
-    assets.avatarImage,
-    (scene.clientName || "C").slice(0, 1).toUpperCase()
-  );
-
-  ctx.fillStyle = "#fff";
-  ctx.font = `700 ${9 * ss}px ${FONT_STACK}`;
-  ctx.fillText(
-    fitText(scene.clientName || "Client", 20),
-    layout.screen.x + STORY_LAYOUT.nameX * sx,
-    layout.screen.y + STORY_LAYOUT.nameY * sy
-  );
-
-  ctx.fillStyle = "rgba(255,255,255,0.95)";
-  ctx.font = `500 ${14 * ss}px ${FONT_STACK}`;
-  ctx.fillText(
-    "⋯",
-    layout.screen.x + layout.screen.w - STORY_LAYOUT.menuXFromRight * sx,
-    layout.screen.y + STORY_LAYOUT.closeY * sy
-  );
-  ctx.fillText(
-    "×",
-    layout.screen.x + layout.screen.w - STORY_LAYOUT.closeXFromRight * sx,
-    layout.screen.y + STORY_LAYOUT.closeY * sy
-  );
-
-  if (scene.primaryText.trim()) {
-    ctx.fillStyle = "#fff";
-    ctx.font = `600 ${11 * ss}px ${FONT_STACK}`;
-    drawWrappedText(
-      ctx,
-      scene.primaryText,
-      layout.screen.x + STORY_LAYOUT.captionX * sx,
-      layout.screen.y + layout.screen.h - STORY_LAYOUT.captionYFromBottom * sy,
-      layout.screen.w - STORY_LAYOUT.captionX * 2 * sx,
-      STORY_LAYOUT.captionMaxLines,
-      STORY_LAYOUT.captionLineHeight * sy
-    );
-  }
-
-  ctx.fillStyle = "#fff";
-  ctx.font = `500 ${9.5 * ss}px ${FONT_STACK}`;
-  ctx.fillText(
-    "Ad",
-    layout.screen.x + STORY_LAYOUT.footerLabelX * sx,
-    layout.screen.y + layout.screen.h - STORY_LAYOUT.footerLabelBaselineFromBottom * sy
-  );
-
-  const iconSize = STORY_LAYOUT.footerIconSize * ss;
-  const iconGap = STORY_LAYOUT.footerIconGap * ss;
-  const iconsY = layout.screen.y + layout.screen.h - STORY_LAYOUT.footerIconsBottom * sy - iconSize;
-  const iconsTotalW = iconSize * 3 + iconGap * 2;
-  let iconX = layout.screen.x + layout.screen.w - STORY_LAYOUT.footerIconsRight * sx - iconsTotalW;
-  const icons = [assets.heartIcon, assets.commentIcon, assets.sendIcon];
-
-  for (const icon of icons) {
-    if (icon) {
-      drawTintedImage(
-        ctx,
-        icon,
-        { x: iconX, y: iconsY, w: iconSize, h: iconSize },
-        "#ffffff"
-      );
-    } else {
-      drawFallbackActionIcon(ctx, iconX, iconsY, iconSize);
-    }
-    iconX += iconSize + iconGap;
-  }
-
-  if (scene.ctaVisible) {
-    drawStoryCtaPill(
-      ctx,
-      layout.screen,
-      layout.screen.w / domScreenW,
-      scene.cta,
-      scene.ctaBgColor,
-      scene.ctaTextColor
-    );
+    drawShortVideoSurface(ctx, scene, layout, assets, elapsedMs, durationMs, mediaSource);
   }
 
   ctx.restore();
