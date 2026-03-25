@@ -36,7 +36,7 @@ export function aspectToRatio(aspect: MediaAspect): number {
 
 export function storySurfaceFromPlatform(platform: string): StoryLikeSurface | null {
   const key = platform.toLowerCase();
-  if (key.includes("tiktok")) return "tiktok";
+  if (key.includes("tiktok")) return "instagram-reels";
   if (key.includes("reels")) return "instagram-reels";
   if (key.includes("story")) return "instagram-story";
   return null;

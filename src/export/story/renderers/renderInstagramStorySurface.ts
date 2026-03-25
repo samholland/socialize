@@ -12,6 +12,12 @@ type Rect = { x: number; y: number; w: number; h: number };
 type Layout = { frame: Rect; screen: Rect; screenRadius: number; scale: number };
 
 type InstagramStoryRenderHelpers = {
+  drawStoryStatusBar: (
+    ctx: CanvasRenderingContext2D,
+    layout: Layout,
+    tone: "light" | "dark" | "auto",
+    timeLabel?: string
+  ) => void;
   drawStoryMedia: (
     ctx: CanvasRenderingContext2D,
     mediaRect: Rect,
@@ -120,6 +126,8 @@ export function renderInstagramStorySurface({
     layout.screen.w,
     STORY_LAYOUT.topGradientHeight * sy
   );
+
+  helpers.drawStoryStatusBar(ctx, layout, "auto");
 
   const barGap = STORY_LAYOUT.progressGap * sx;
   const barX = layout.screen.x + STORY_LAYOUT.progressLeftRight * sx;

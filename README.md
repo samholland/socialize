@@ -6,7 +6,9 @@ This is a Next.js prototype for ideating and mocking social campaigns with a thr
 - Middle pane: campaign editor
 - Right pane: live visual mockup with media upload and PNG export
 
-The current version is intentionally client-first and lightweight.
+The app now supports both:
+- local-only mode (default when Supabase env vars are missing)
+- cloud-backed mode (Supabase Auth + Postgres + Storage)
 
 ## Current Features
 
@@ -21,7 +23,12 @@ The current version is intentionally client-first and lightweight.
   - click-to-upload media
   - PNG export of the composed preview
 - CSV export of the selected campaign's text metadata
-- Local persistence in browser `localStorage`
+- Local persistence in browser `localStorage` (local mode)
+- Cloud persistence scoped to authenticated users (Supabase mode)
+- Personal workspace auto-provisioning on first sign-in
+- Optional organization workspaces (schema + RLS support)
+- Private media uploads via signed upload/read URLs
+- One-time prompt to import legacy local data into cloud workspace
 
 ## Getting Started
 
@@ -40,25 +47,25 @@ npm run lint
 npm run build
 ```
 
-## Next Steps (AWS-Backed V1)
+## Supabase Setup (Cloud Mode)
 
-Recommended low-ops stack:
+1. Create a Supabase project.
+2. Run SQL migration:
+   - `supabase/migrations/20260325_v1_backend.sql`
+3. Create `.env.local` from `.env.example` and set:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+   - `NEXT_PUBLIC_SUPABASE_MEDIA_BUCKET` (optional, defaults to `campaign-media`)
+4. Start app:
+   - `npm run dev`
 
-- Static app hosting: S3 + CloudFront (or Amplify Hosting)
-- API: API Gateway (HTTP API) + Lambda
-- Database: DynamoDB
-- Media storage: S3 with pre-signed upload URLs
-- Auth (later): Cognito
+If Supabase env vars are not set, the app runs in local-only mode.
 
-Incremental rollout plan:
+## Security Model (Cloud Mode)
 
-1. Replace local persistence with API-backed CRUD
-2. Store uploaded media in S3 and persist media keys in DB
-3. Add campaign versioning/history
-4. Add managed authentication and role access
-5. Add server-generated exports only if pixel-perfect output is required
-
-## Notes
-
-- This prototype currently stores all data in the browser.
-- Uploaded media is not yet persisted across devices/sessions unless you wire S3/API support.
+- RLS enabled for app tables.
+- Personal workspace access: owner only.
+- Organization workspace access: members only.
+- Organization management: owner only.
+- Storage bucket is private; media access is signed URL + workspace authorization.

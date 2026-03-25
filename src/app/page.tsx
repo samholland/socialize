@@ -9,14 +9,25 @@ import {
 } from "react";
 import html2canvas from "html2canvas";
 import JSZip from "jszip";
+import type { Session, User } from "@supabase/supabase-js";
 import {
   PreviewCanvas,
   type PreviewMedia,
   type PreviewCanvasHandle,
 } from "@/components/PreviewCanvas";
+import { AuthGate } from "@/components/AuthGate";
 import {
   exportInstagramStoryVideoWebm,
 } from "@/export/story/exportImageStoryVideo";
+import { getBrowserSupabaseClient } from "@/lib/supabase/browser";
+import { isSupabaseConfigured } from "@/lib/supabase/env";
+import {
+  ensureProfileAndPersonalWorkspace,
+  listAccessibleWorkspaces,
+  loadWorkspaceData as loadCloudWorkspaceData,
+  saveWorkspaceData,
+  type CloudAppData,
+} from "@/lib/cloud/workspaces";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -27,7 +38,7 @@ type Platform =
   | "Facebook Feed"
   | "TikTok";
 
-type WorkspaceKind = "local"; // future: "collaborative" | "personal"
+type WorkspaceKind = "local" | "personal" | "organization";
 type Workspace = { id: string; name: string; kind: WorkspaceKind };
 
 type CtaOption = "Learn More" | "Shop Now" | "Sign Up" | "Download";
@@ -53,6 +64,9 @@ type Campaign = {
   ctaBgColor: string;
   ctaTextColor: string;
   status: CampaignStatus;
+  mediaStoragePath?: string;
+  mediaKind?: "none" | "image" | "video";
+  mediaMimeType?: string;
   updatedAt: string;
 };
 
@@ -108,13 +122,14 @@ const UI_KEY = "socialize.v1.ui";
 const WORKSPACES_KEY = "socialize.workspaces";
 const ACTIVE_WS_KEY = "socialize.activeWs";
 const WS_DATA_PREFIX = "socialize.ws.";
+const CLOUD_ACTIVE_WS_KEY = "socialize.cloud.activeWs";
+const CLOUD_IMPORT_DONE_PREFIX = "socialize.cloud.import.done.";
 
 const PLATFORM_OPTIONS: Platform[] = [
   "Instagram Feed",
   "Instagram Story",
   "Instagram Reels",
   "Facebook Feed",
-  "TikTok",
 ];
 const CTA_OPTIONS: CtaOption[] = [
   "Learn More",
@@ -128,7 +143,7 @@ const OBJECTIVE_OPTIONS: CampaignObjective[] = [
   "Conversion",
 ];
 const FEED_ASPECT_OPTIONS: MediaAspect[] = ["1:1", "3:4"];
-const DEFAULT_CTA_BG = "#4f94aa";
+const DEFAULT_CTA_BG = "#f2f2f2";
 const EMPTY_MEDIA: PreviewMedia = { kind: "none" };
 
 // ─── Helpers ─────────────────────────────────────────────────────
@@ -145,7 +160,7 @@ function nowIso(): string {
 }
 
 function isStoryPlatform(p: Platform): boolean {
-  return p === "Instagram Story" || p === "Instagram Reels" || p === "TikTok";
+  return p === "Instagram Story" || p === "Instagram Reels";
 }
 
 function normalizeAspect(
@@ -180,6 +195,19 @@ function platformTreeBadge(platform: Platform): string {
     TikTok: "TIKTOK",
   };
   return labels[platform];
+}
+
+function normalizePlatform(v: unknown): Platform {
+  if (
+    v === "Instagram Feed" ||
+    v === "Instagram Story" ||
+    v === "Instagram Reels" ||
+    v === "Facebook Feed"
+  ) {
+    return v;
+  }
+  if (v === "TikTok") return "Instagram Reels";
+  return "Instagram Feed";
 }
 
 function normalizeObjective(v: unknown): CampaignObjective {
@@ -227,6 +255,9 @@ function newCampaign(
     ctaBgColor,
     ctaTextColor: contrastText(ctaBgColor),
     status: "draft",
+    mediaStoragePath: "",
+    mediaKind: "none",
+    mediaMimeType: "",
     updatedAt: nowIso(),
   };
 }
@@ -246,13 +277,15 @@ function newProject(name: string, campaigns: Campaign[]): Project {
 }
 
 function normalizeCampaign(c: Campaign): Campaign {
+  const platform = normalizePlatform((c as { platform?: unknown }).platform);
   const ctaBgColor = normalizeHex(
     (c as { ctaBgColor?: string }).ctaBgColor,
     DEFAULT_CTA_BG
   );
   return {
     ...c,
-    mediaAspect: normalizeAspect(c.platform, c.mediaAspect),
+    platform,
+    mediaAspect: normalizeAspect(platform, c.mediaAspect),
     cta:
       typeof (c as { cta?: unknown }).cta === "string"
         ? ((c as { cta?: string }).cta ?? "Learn More")
@@ -283,6 +316,19 @@ function normalizeCampaign(c: Campaign): Campaign {
         : "",
     status:
       (c as { status?: unknown }).status === "ready" ? "ready" : "draft",
+    mediaStoragePath:
+      typeof (c as { mediaStoragePath?: unknown }).mediaStoragePath === "string"
+        ? ((c as { mediaStoragePath?: string }).mediaStoragePath ?? "")
+        : "",
+    mediaKind:
+      (c as { mediaKind?: unknown }).mediaKind === "image" ||
+      (c as { mediaKind?: unknown }).mediaKind === "video"
+        ? ((c as { mediaKind?: "none" | "image" | "video" }).mediaKind ?? "none")
+        : "none",
+    mediaMimeType:
+      typeof (c as { mediaMimeType?: unknown }).mediaMimeType === "string"
+        ? ((c as { mediaMimeType?: string }).mediaMimeType ?? "")
+        : "",
     ctaBgColor,
     ctaTextColor: contrastText(ctaBgColor),
   };
@@ -411,6 +457,54 @@ function loadWorkspaceData(wsId: string): { data: AppData; selection: Selection;
     const data = emptyWorkspace();
     return { data, selection: defaultSelection(data), level: "campaign" };
   }
+}
+
+function getLegacyWorkspaceForImport(): AppData | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const legacyRaw = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (legacyRaw) {
+      const parsed = JSON.parse(legacyRaw) as { data?: AppData };
+      if (parsed?.data?.clients) return normalizeData(parsed.data);
+    }
+    const wsListRaw = localStorage.getItem(WORKSPACES_KEY);
+    const wsList = wsListRaw ? (JSON.parse(wsListRaw) as Workspace[]) : [];
+    for (const ws of wsList) {
+      const raw = localStorage.getItem(WS_DATA_PREFIX + ws.id);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw) as { data?: AppData };
+      if (parsed?.data?.clients && parsed.data.clients.length > 0) {
+        return normalizeData(parsed.data);
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function mergeImportedData(current: AppData, incoming: AppData): AppData {
+  const existingClientIds = new Set(current.clients.map((c) => c.id));
+  const dedupedImported = incoming.clients.map((client) => {
+    if (!existingClientIds.has(client.id)) return client;
+    const clientId = newId("cl");
+    return {
+      ...client,
+      id: clientId,
+      projects: client.projects.map((project) => {
+        const projectId = newId("prj");
+        return {
+          ...project,
+          id: projectId,
+          campaigns: project.campaigns.map((campaign) => ({
+            ...campaign,
+            id: newId("cmp"),
+          })),
+        };
+      }),
+    };
+  });
+  return { clients: [...current.clients, ...dedupedImported] };
 }
 
 type UiPrefs = {
@@ -730,6 +824,15 @@ const DEFAULT_EMPTY_DATA = emptyWorkspace();
 const DEFAULT_SELECTION: Selection = { clientId: "", projectId: "", campaignId: "" };
 
 export default function Home() {
+  const cloudEnabled = isSupabaseConfigured();
+  const supabase = useMemo(() => getBrowserSupabaseClient(), []);
+  const [authReady, setAuthReady] = useState(!cloudEnabled);
+  const [session, setSession] = useState<Session | null>(null);
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [cloudHydrated, setCloudHydrated] = useState(false);
+  const [showImportPrompt, setShowImportPrompt] = useState(false);
+  const [importPending, setImportPending] = useState(false);
+
   // Workspace — start with static defaults to match SSR, then load from localStorage after mount
   const [workspaces, setWorkspaces] = useState<Workspace[]>([DEFAULT_WS]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>(DEFAULT_WS.id);
@@ -746,17 +849,9 @@ export default function Home() {
   // Dark mode
   const [darkMode, setDarkMode] = useState(false);
 
-  // Load from localStorage after mount (avoids SSR/client hydration mismatch)
+  // Load UI prefs after mount (avoids SSR/client hydration mismatch)
   useEffect(() => {
-    const wsList = loadWorkspaceList();
-    const wsId = loadActiveWsId(wsList);
-    const wsData = loadWorkspaceData(wsId);
     const ui = loadUiPrefs();
-    setWorkspaces(wsList);
-    setActiveWorkspaceId(wsId);
-    setData(wsData.data);
-    setSelection(wsData.selection);
-    setSelectionLevel(wsData.level);
     setPanelWidths(ui.panelWidths);
     setDarkMode(ui.darkMode);
     setShowIgFeedOverlay(ui.showIgFeedOverlay);
@@ -764,9 +859,125 @@ export default function Home() {
     setIgFeedOverlayScale(ui.igFeedOverlayScale);
     setIgFeedOverlayOffsetX(ui.igFeedOverlayOffsetX);
     setIgFeedOverlayOffsetY(ui.igFeedOverlayOffsetY);
-    setStorageReady(true);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Local-only bootstrap
+  useEffect(() => {
+    if (cloudEnabled) return;
+    const wsList = loadWorkspaceList();
+    const wsId = loadActiveWsId(wsList);
+    const wsData = loadWorkspaceData(wsId);
+    setWorkspaces(wsList);
+    setActiveWorkspaceId(wsId);
+    setData(wsData.data);
+    setSelection(wsData.selection);
+    setSelectionLevel(wsData.level);
+    setStorageReady(true);
+  }, [cloudEnabled]);
+
+  // Supabase auth bootstrap
+  useEffect(() => {
+    if (!cloudEnabled) return;
+    if (!supabase) return;
+
+    let mounted = true;
+    void supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      setSession(data.session);
+      setAuthUser(data.session?.user ?? null);
+      setAuthReady(true);
+    });
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setAuthUser(nextSession?.user ?? null);
+      setAuthReady(true);
+    });
+
+    return () => {
+      mounted = false;
+      sub.subscription.unsubscribe();
+    };
+  }, [cloudEnabled, supabase]);
+
+  // Cloud workspace bootstrap for authenticated user
+  useEffect(() => {
+    if (!cloudEnabled) return;
+    if (!supabase) return;
+    if (!authReady) return;
+
+    if (!authUser) {
+      setStorageReady(false);
+      setCloudHydrated(false);
+      setShowImportPrompt(false);
+      setWorkspaces([DEFAULT_WS]);
+      setActiveWorkspaceId(DEFAULT_WS.id);
+      setData(DEFAULT_EMPTY_DATA);
+      setSelection(DEFAULT_SELECTION);
+      setSelectionLevel("campaign");
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const personal = await ensureProfileAndPersonalWorkspace(supabase, authUser);
+        const wsList = await listAccessibleWorkspaces(supabase, authUser.id);
+        const resolvedList =
+          wsList.length > 0
+            ? wsList
+            : [personal];
+
+        const storedActive =
+          typeof window !== "undefined"
+            ? localStorage.getItem(CLOUD_ACTIVE_WS_KEY)
+            : null;
+        const wsId =
+          (storedActive && resolvedList.find((w) => w.id === storedActive)?.id) ||
+          resolvedList[0]?.id ||
+          personal.id;
+
+        const cloudData = (await loadCloudWorkspaceData(
+          supabase,
+          wsId
+        )) as CloudAppData;
+        const normalized = normalizeData(cloudData as AppData);
+        const sel = defaultSelection(normalized);
+
+        if (cancelled) return;
+        setWorkspaces(
+          resolvedList.map((w) => ({ id: w.id, name: w.name, kind: w.kind }))
+        );
+        setActiveWorkspaceId(wsId);
+        hydratedWorkspaceRef.current = wsId;
+        setData(normalized);
+        setSelection(sel);
+        setSelectionLevel("campaign");
+        setStorageReady(true);
+        setCloudHydrated(true);
+        void hydrateSignedMediaForWorkspace(wsId, normalized).catch((error) => {
+          console.error("Failed to hydrate signed media", error);
+        });
+
+        if (typeof window !== "undefined") {
+          const importKey = CLOUD_IMPORT_DONE_PREFIX + authUser.id;
+          if (!localStorage.getItem(importKey)) {
+            const legacy = getLegacyWorkspaceForImport();
+            if (legacy?.clients?.length) {
+              setShowImportPrompt(true);
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Failed to load cloud workspace", error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authReady, authUser, cloudEnabled, supabase]);
 
   // Export panel
   const [exportPanelOpen, setExportPanelOpen] = useState(false);
@@ -810,28 +1021,67 @@ export default function Home() {
   // Preview body ref for auto-zoom
   const previewBodyRef = useRef<HTMLDivElement>(null);
   const previewExportRef = useRef<HTMLDivElement>(null);
+  const saveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hydratedWorkspaceRef = useRef<string>("");
 
   // ── Persistence ────────────────────────────────────────────────
 
   // Persist workspace list + active workspace id
   useEffect(() => {
     if (!storageReady) return;
+    if (cloudEnabled) return;
     localStorage.setItem(WORKSPACES_KEY, JSON.stringify(workspaces));
-  }, [storageReady, workspaces]);
+  }, [cloudEnabled, storageReady, workspaces]);
 
   useEffect(() => {
     if (!storageReady) return;
-    localStorage.setItem(ACTIVE_WS_KEY, activeWorkspaceId);
-  }, [storageReady, activeWorkspaceId]);
+    localStorage.setItem(
+      cloudEnabled ? CLOUD_ACTIVE_WS_KEY : ACTIVE_WS_KEY,
+      activeWorkspaceId
+    );
+  }, [cloudEnabled, storageReady, activeWorkspaceId]);
 
   // Persist current workspace data
   useEffect(() => {
     if (!storageReady) return;
-    localStorage.setItem(
-      WS_DATA_PREFIX + activeWorkspaceId,
-      JSON.stringify({ data, selection, level: selectionLevel })
-    );
-  }, [storageReady, data, selection, selectionLevel, activeWorkspaceId]);
+    if (!cloudEnabled) {
+      localStorage.setItem(
+        WS_DATA_PREFIX + activeWorkspaceId,
+        JSON.stringify({ data, selection, level: selectionLevel })
+      );
+      return;
+    }
+    if (!supabase || !authUser || !cloudHydrated) return;
+    if (hydratedWorkspaceRef.current !== activeWorkspaceId) return;
+
+    if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
+    saveDebounceRef.current = setTimeout(() => {
+      void saveWorkspaceData(
+        supabase,
+        activeWorkspaceId,
+        data as CloudAppData,
+        authUser.id
+      ).catch((error) => {
+        console.error("Failed to save workspace", error);
+      });
+    }, 500);
+  }, [
+    storageReady,
+    cloudEnabled,
+    supabase,
+    authUser,
+    cloudHydrated,
+    data,
+    selection,
+    selectionLevel,
+    activeWorkspaceId,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!storageReady) return;
@@ -900,7 +1150,6 @@ export default function Home() {
     const ro = new ResizeObserver(compute);
     ro.observe(el);
     return () => ro.disconnect();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Derived ────────────────────────────────────────────────────
@@ -938,6 +1187,52 @@ export default function Home() {
 
   // ── Media helpers ──────────────────────────────────────────────
 
+  async function hydrateSignedMediaForWorkspace(
+    workspaceId: string,
+    nextData: AppData
+  ) {
+    if (!cloudEnabled || !session?.access_token) return;
+    const campaigns = nextData.clients.flatMap((client) =>
+      client.projects.flatMap((project) => project.campaigns)
+    );
+    const byCampaign = new Map<string, { path: string; kind: "image" | "video" }>();
+    for (const campaign of campaigns) {
+      if (!campaign.mediaStoragePath) continue;
+      const kind = campaign.mediaKind === "video" ? "video" : campaign.mediaKind === "image" ? "image" : null;
+      if (!kind) continue;
+      byCampaign.set(campaign.id, { path: campaign.mediaStoragePath, kind });
+    }
+    if (byCampaign.size === 0) {
+      setCampaignMediaMap({});
+      return;
+    }
+
+    const paths = Array.from(new Set(Array.from(byCampaign.values()).map((v) => v.path)));
+    const res = await fetch("/api/media/sign-read", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        workspaceId,
+        paths,
+      }),
+    });
+    if (!res.ok) {
+      throw new Error("Failed to sign media URLs");
+    }
+    const json = (await res.json()) as { urls?: Record<string, string> };
+    const urlMap = json.urls ?? {};
+    const nextCampaignMedia: Record<string, PreviewMedia> = {};
+    byCampaign.forEach((value, campaignId) => {
+      const signed = urlMap[value.path];
+      if (!signed) return;
+      nextCampaignMedia[campaignId] = { kind: value.kind, url: signed };
+    });
+    setCampaignMediaMap(nextCampaignMedia);
+  }
+
   function setCampaignMedia(campaignId: string, media: PreviewMedia) {
     setCampaignMediaMap((prev) => {
       const cur = prev[campaignId];
@@ -960,21 +1255,140 @@ export default function Home() {
     });
   }
 
-  function setMediaFromFile(campaignId: string, file: File) {
+  async function uploadMediaToCloud(
+    campaignId: string,
+    file: File
+  ): Promise<{ kind: "image" | "video"; url: string; storagePath: string }> {
+    if (!supabase || !session?.access_token) {
+      throw new Error("You must be signed in to upload media.");
+    }
+    const mediaKind: "image" | "video" = file.type.startsWith("video/") ? "video" : "image";
+
+    const signRes = await fetch("/api/media/sign-upload", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        workspaceId: activeWorkspaceId,
+        campaignId,
+        fileName: file.name,
+        contentType: file.type,
+      }),
+    });
+    if (!signRes.ok) {
+      throw new Error("Failed to start upload.");
+    }
+    const signJson = (await signRes.json()) as { path: string; token: string };
+    const { path, token } = signJson;
+    if (!path || !token) throw new Error("Upload token missing.");
+
+    const uploadRes = await supabase.storage
+      .from(process.env.NEXT_PUBLIC_SUPABASE_MEDIA_BUCKET || "campaign-media")
+      .uploadToSignedUrl(path, token, file);
+    if (uploadRes.error) {
+      throw uploadRes.error;
+    }
+
+    const finalizeRes = await fetch("/api/media/finalize", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        workspaceId: activeWorkspaceId,
+        campaignId,
+        path,
+        mediaKind,
+        mimeType: file.type,
+        sizeBytes: file.size,
+      }),
+    });
+    if (!finalizeRes.ok) {
+      throw new Error("Failed to finalize uploaded media.");
+    }
+
+    const readRes = await fetch("/api/media/sign-read", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        workspaceId: activeWorkspaceId,
+        paths: [path],
+      }),
+    });
+    if (!readRes.ok) {
+      throw new Error("Failed to fetch media URL.");
+    }
+    const readJson = (await readRes.json()) as { urls?: Record<string, string> };
+    const signedUrl = readJson.urls?.[path];
+    if (!signedUrl) {
+      throw new Error("Media URL was not generated.");
+    }
+    return { kind: mediaKind, url: signedUrl, storagePath: path };
+  }
+
+  async function clearCampaignMediaInCloud(campaignId: string): Promise<void> {
+    if (!supabase || !session?.access_token) return;
+    const response = await fetch("/api/media/remove", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        workspaceId: activeWorkspaceId,
+        campaignId,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error("Failed to clear media.");
+    }
+  }
+
+  async function setMediaFromFile(campaignId: string, file: File) {
+    if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) {
+      alert("Please choose an image or video file.");
+      return;
+    }
+
+    if (cloudEnabled) {
+      try {
+        const uploaded = await uploadMediaToCloud(campaignId, file);
+        setCampaignMedia(campaignId, { kind: uploaded.kind, url: uploaded.url });
+        setData((prev) => ({
+          clients: prev.clients.map((client) => ({
+            ...client,
+            projects: client.projects.map((project) => ({
+              ...project,
+              campaigns: project.campaigns.map((campaign) =>
+                campaign.id === campaignId
+                  ? {
+                      ...campaign,
+                      mediaStoragePath: uploaded.storagePath,
+                      mediaKind: uploaded.kind,
+                      mediaMimeType: file.type,
+                      updatedAt: nowIso(),
+                    }
+                  : campaign
+              ),
+            })),
+          })),
+        }));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Upload failed";
+        alert(message);
+      }
+      return;
+    }
+
     const url = URL.createObjectURL(file);
-
-    if (file.type.startsWith("image/")) {
-      setCampaignMedia(campaignId, { kind: "image", url });
-      return;
-    }
-
-    if (file.type.startsWith("video/")) {
-      setCampaignMedia(campaignId, { kind: "video", url });
-      return;
-    }
-
-    URL.revokeObjectURL(url);
-    alert("Please choose an image or video file.");
+    const mediaKind: "image" | "video" = file.type.startsWith("video/") ? "video" : "image";
+    setCampaignMedia(campaignId, { kind: mediaKind, url });
   }
 
   function pickPreviewMedia() {
@@ -984,7 +1398,7 @@ export default function Home() {
   function onPreviewFilePicked(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (file && selectedCampaign) {
-      setMediaFromFile(selectedCampaign.id, file);
+      void setMediaFromFile(selectedCampaign.id, file);
     }
     e.target.value = "";
   }
@@ -993,7 +1407,7 @@ export default function Home() {
     e.preventDefault();
     const file = e.dataTransfer.files?.[0];
     if (file && selectedCampaign) {
-      setMediaFromFile(selectedCampaign.id, file);
+      void setMediaFromFile(selectedCampaign.id, file);
     }
   }
 
@@ -1005,6 +1419,32 @@ export default function Home() {
 
   function switchWorkspace(wsId: string) {
     if (wsId === activeWorkspaceId) { setWsDropdownOpen(false); return; }
+    if (cloudEnabled) {
+      if (!supabase || !authUser) return;
+      setWsDropdownOpen(false);
+      setStorageReady(false);
+      void (async () => {
+        try {
+          const cloudData = (await loadCloudWorkspaceData(
+            supabase,
+            wsId
+          )) as CloudAppData;
+          const normalized = normalizeData(cloudData as AppData);
+          hydratedWorkspaceRef.current = wsId;
+          setActiveWorkspaceId(wsId);
+          setData(normalized);
+          setSelection(defaultSelection(normalized));
+          setSelectionLevel("campaign");
+          await hydrateSignedMediaForWorkspace(wsId, normalized);
+        } catch (error) {
+          console.error("Failed to switch workspace", error);
+          alert("Unable to switch workspace.");
+        } finally {
+          setStorageReady(true);
+        }
+      })();
+      return;
+    }
     // Save current workspace data before switching
     localStorage.setItem(
       WS_DATA_PREFIX + activeWorkspaceId,
@@ -1019,6 +1459,33 @@ export default function Home() {
   }
 
   function createWorkspace() {
+    if (cloudEnabled) {
+      if (!supabase || !authUser) return;
+      const name = `Workspace ${workspaces.length + 1}`;
+      const ws: Workspace = { id: newId("ws"), name, kind: "personal" };
+      setWsDropdownOpen(false);
+      void (async () => {
+        const { error } = await supabase.from("workspaces").insert({
+          id: ws.id,
+          type: "personal",
+          owner_user_id: authUser.id,
+          name: ws.name,
+        });
+        if (error) {
+          alert("Failed to create workspace.");
+          return;
+        }
+        const empty = emptyWorkspace();
+        setWorkspaces((prev) => [...prev, ws]);
+        hydratedWorkspaceRef.current = ws.id;
+        setCampaignMediaMap({});
+        setActiveWorkspaceId(ws.id);
+        setData(empty);
+        setSelection(defaultSelection(empty));
+        setSelectionLevel("campaign");
+      })();
+      return;
+    }
     const name = `Workspace ${workspaces.length + 1}`;
     const ws: Workspace = { id: newId("ws"), name, kind: "local" };
     // Save current workspace before switching
@@ -1035,8 +1502,55 @@ export default function Home() {
     setWsDropdownOpen(false);
   }
 
-  function renameWorkspace(wsId: string, name: string) {
-    setWorkspaces((prev) => prev.map((w) => w.id === wsId ? { ...w, name } : w));
+  function markImportDone(userId: string) {
+    if (typeof window === "undefined") return;
+    localStorage.setItem(CLOUD_IMPORT_DONE_PREFIX + userId, "1");
+  }
+
+  async function importLegacyWorkspaceNow() {
+    if (!cloudEnabled || !supabase || !authUser) return;
+    const legacy = getLegacyWorkspaceForImport();
+    if (!legacy || legacy.clients.length === 0) {
+      markImportDone(authUser.id);
+      setShowImportPrompt(false);
+      return;
+    }
+
+    const merged = mergeImportedData(data, legacy);
+    setImportPending(true);
+    try {
+      setData(merged);
+      if (!selection.clientId) {
+        setSelection(defaultSelection(merged));
+        setSelectionLevel("campaign");
+      }
+      await saveWorkspaceData(
+        supabase,
+        activeWorkspaceId,
+        merged as CloudAppData,
+        authUser.id
+      );
+      markImportDone(authUser.id);
+      setShowImportPrompt(false);
+    } catch (error) {
+      console.error("Failed to import legacy workspace", error);
+      alert("Unable to import local data right now.");
+    } finally {
+      setImportPending(false);
+    }
+  }
+
+  function skipLegacyWorkspaceImport() {
+    if (!authUser) return;
+    markImportDone(authUser.id);
+    setShowImportPrompt(false);
+  }
+
+  async function signOut() {
+    if (!supabase) return;
+    await supabase.auth.signOut();
+    setCampaignMediaMap({});
+    setWsDropdownOpen(false);
   }
 
   // ── Soft delete with undo ──────────────────────────────────────
@@ -1150,34 +1664,6 @@ export default function Home() {
 
   // ── Delete ─────────────────────────────────────────────────────
 
-  function deleteClient(clientId: string) {
-    const client = data.clients.find((c) => c.id === clientId);
-    if (!client) return;
-    const allCampaignIds = client.projects.flatMap((p) =>
-      p.campaigns.map((c) => c.id)
-    );
-    const snapshot = { ...data };
-    const selSnap = { ...selection };
-    const levelSnap = selectionLevel;
-    softDelete(`"${client.name}"`, () => {
-      cleanupCampaignMedia(allCampaignIds);
-      setData((prev) => ({ clients: prev.clients.filter((c) => c.id !== clientId) }));
-      if (selection.clientId === clientId) {
-        const remaining = data.clients.filter((c) => c.id !== clientId);
-        const next = remaining[0];
-        setSelection(next
-          ? { clientId: next.id, projectId: next.projects[0]?.id ?? "", campaignId: next.projects[0]?.campaigns[0]?.id ?? "" }
-          : { clientId: "", projectId: "", campaignId: "" }
-        );
-        setSelectionLevel("client");
-      }
-    }, () => {
-      setData(snapshot);
-      setSelection(selSnap);
-      setSelectionLevel(levelSnap);
-    });
-  }
-
   function deleteProject(clientId: string, projectId: string) {
     const client = data.clients.find((c) => c.id === clientId);
     const project = client?.projects.find((p) => p.id === projectId);
@@ -1256,34 +1742,6 @@ export default function Home() {
   }
 
   // ── Duplicate ──────────────────────────────────────────────────
-
-  function duplicateClient(clientId: string) {
-    const client = data.clients.find((c) => c.id === clientId);
-    if (!client) return;
-    const newClient: Client = {
-      ...client,
-      id: newId("cl"),
-      name: `${client.name} (Copy)`,
-      isVerified: client.isVerified,
-      profileImageDataUrl: client.profileImageDataUrl,
-      projects: client.projects.map((p) => ({
-        ...p,
-        id: newId("prj"),
-        campaigns: p.campaigns.map((c) => ({
-          ...normalizeCampaign(c),
-          id: newId("cmp"),
-          status: "draft" as CampaignStatus,
-          updatedAt: nowIso(),
-        })),
-      })),
-    };
-    setData((prev) => {
-      const idx = prev.clients.findIndex((c) => c.id === clientId);
-      const next = [...prev.clients];
-      next.splice(idx + 1, 0, newClient);
-      return { clients: next };
-    });
-  }
 
   function duplicateProject(clientId: string, projectId: string) {
     const project = data.clients
@@ -1852,7 +2310,7 @@ export default function Home() {
                 <div className="ws-dropdown-divider" />
                 <button className="ws-dropdown-item ws-dropdown-new" onClick={createWorkspace}>
                   <IconPlus />
-                  <span>New Workspace</span>
+                  <span>{cloudEnabled ? "New Personal Workspace" : "New Workspace"}</span>
                 </button>
               </div>
             )}
@@ -1908,8 +2366,9 @@ export default function Home() {
                     {/* Client row */}
                     <div
                       className={`tree-row tree-row-client tree-row-with-toggle${isClientSelected && selectionLevel === "client" ? " is-selected" : ""}`}
-                      onClick={() => {
+                      onClick={(e) => {
                         selectClient(client.id);
+                        if ((e.target as HTMLElement).closest(".tree-no-toggle")) return;
                         toggleClient(client.id);
                       }}
                       onDoubleClick={() => beginClientEdit(client.id, client.name)}
@@ -1942,7 +2401,7 @@ export default function Home() {
                           onClick={(e) => e.stopPropagation()}
                         />
                       ) : (
-                        <span className="tree-label tree-label-client">
+                        <span className="tree-label tree-label-client tree-no-toggle">
                           {client.name}
                         </span>
                       )}
@@ -1973,8 +2432,9 @@ export default function Home() {
                               {/* Project row */}
                               <div
                                 className={`tree-row tree-row-project tree-row-with-toggle${isProjSelected && selectionLevel === "project" ? " is-selected" : ""}`}
-                                onClick={() => {
+                                onClick={(e) => {
                                   selectProject(client.id, project.id);
+                                  if ((e.target as HTMLElement).closest(".tree-no-toggle")) return;
                                   toggleProject(project.id);
                                 }}
                                 onDoubleClick={() =>
@@ -1994,7 +2454,7 @@ export default function Home() {
                                     onClick={(e) => e.stopPropagation()}
                                   />
                                 ) : (
-                                  <span className="tree-label tree-label-project">
+                                  <span className="tree-label tree-label-project tree-no-toggle">
                                     {project.name}
                                   </span>
                                 )}
@@ -2486,7 +2946,6 @@ export default function Home() {
     }
 
     const campaign = selectedCampaign;
-    const project = selectedProject;
     const isInstagramStory = campaign.platform === "Instagram Story";
     const isFacebookFeed = campaign.platform === "Facebook Feed";
 
@@ -2630,7 +3089,7 @@ export default function Home() {
                       className="form-input"
                       value={campaign.facebookPageName}
                       onChange={(e) => updateCampaign({ facebookPageName: e.target.value })}
-                      placeholder="e.g. PODS Moving & Storage"
+                      placeholder=" "
                     />
                   </div>
                 </div>
@@ -2644,7 +3103,7 @@ export default function Home() {
                       className="form-input"
                       value={campaign.headline}
                       onChange={(e) => updateCampaign({ headline: e.target.value })}
-                      placeholder="e.g. New Collection Available Now"
+                      placeholder=" "
                     />
                   </div>
                   <div className="form-group">
@@ -2688,9 +3147,9 @@ export default function Home() {
                   )}
                 </div>
                 <div className="form-group">
-                  <label className="form-label">CTA Colour</label>
+                  <label className="form-label">CTA Color</label>
                   <div className="color-row">
-                    <label className="color-swatch" title="Pick colour">
+                    <label className="color-swatch" title="Pick color">
                       <input
                         type="color"
                         value={campaign.ctaBgColor}
@@ -2780,10 +3239,7 @@ export default function Home() {
 
     const campaign = selectedCampaign;
     const client = selectedClient;
-    const isOverlayCampaign =
-      campaign.platform === "Instagram Feed" ||
-      campaign.platform === "Instagram Reels" ||
-      campaign.platform === "Facebook Feed";
+    const isOverlayCampaign = false;
 
     return (
       <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -2802,7 +3258,19 @@ export default function Home() {
           {selectedMedia.kind !== "none" && (
             <button
               className="btn btn-ghost btn-sm"
-              onClick={() => setCampaignMedia(campaign.id, EMPTY_MEDIA)}
+              onClick={() => {
+                setCampaignMedia(campaign.id, EMPTY_MEDIA);
+                updateCampaign({
+                  mediaStoragePath: "",
+                  mediaKind: "none",
+                  mediaMimeType: "",
+                });
+                if (cloudEnabled) {
+                  void clearCampaignMediaInCloud(campaign.id).catch((error) => {
+                    console.error("Failed to clear media", error);
+                  });
+                }
+              }}
             >
               Remove media
             </button>
@@ -3323,6 +3791,31 @@ export default function Home() {
   // MAIN RENDER
   // ─────────────────────────────────────────────────────────────────────
 
+  if (cloudEnabled && !supabase) {
+    return (
+      <div className="app-root" style={{ display: "grid", placeItems: "center", minHeight: "100vh" }}>
+        <div className="empty-state">
+          <h3>Supabase config missing</h3>
+          <p>Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (cloudEnabled && !authReady) {
+    return (
+      <div className="app-root" style={{ display: "grid", placeItems: "center", minHeight: "100vh" }}>
+        <div className="empty-state">
+          <h3>Loading account…</h3>
+        </div>
+      </div>
+    );
+  }
+
+  if (cloudEnabled && !authUser && supabase) {
+    return <AuthGate supabase={supabase} />;
+  }
+
   return (
     <div className="app-root" data-theme={darkMode ? "dark" : undefined}>
       {/* Top bar */}
@@ -3344,8 +3837,51 @@ export default function Home() {
           >
             Export ↑
           </button>
+          {cloudEnabled && authUser && (
+            <>
+              <span style={{ fontSize: 12, color: "var(--ink-3)", whiteSpace: "nowrap" }}>
+                {authUser.email}
+              </span>
+              <button className="btn btn-secondary btn-sm" onClick={() => void signOut()}>
+                Sign Out
+              </button>
+            </>
+          )}
         </div>
       </header>
+
+      {cloudEnabled && showImportPrompt && authUser && (
+        <div
+          style={{
+            margin: "10px 16px 0",
+            border: "1px solid var(--line)",
+            background: "var(--pane)",
+            borderRadius: 10,
+            padding: "10px 12px",
+            display: "flex",
+            gap: 10,
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink-1)" }}>
+              Import local workspace data?
+            </div>
+            <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+              Found legacy browser data. Import once into your personal cloud workspace.
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            <button className="btn btn-secondary btn-sm" onClick={skipLegacyWorkspaceImport} disabled={importPending}>
+              Skip
+            </button>
+            <button className="btn btn-primary btn-sm" onClick={() => void importLegacyWorkspaceNow()} disabled={importPending}>
+              {importPending ? "Importing..." : "Import now"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 3-pane layout */}
       <div className="app-shell">

@@ -12,7 +12,7 @@ type TikTokRenderHelpers = {
   drawStoryStatusBar: (
     ctx: CanvasRenderingContext2D,
     layout: Layout,
-    tone: "light" | "dark",
+    tone: "light" | "dark" | "auto",
     timeLabel?: string
   ) => void;
   drawStoryMedia: (
@@ -81,7 +81,7 @@ export function renderTikTokSurface({
 
   ctx.fillStyle = "rgba(0,0,0,0.45)";
   ctx.fillRect(layout.screen.x, layout.screen.y, layout.screen.w, 46 * s);
-  helpers.drawStoryStatusBar(ctx, layout, "light");
+  helpers.drawStoryStatusBar(ctx, layout, "auto");
 
   ctx.fillStyle = "rgba(255,255,255,0.45)";
   ctx.font = `500 ${11 * s}px ${FONT_STACK}`;

@@ -1,98 +1,25 @@
 import { FONT_STACK } from "@/components/preview-canvas/constants";
 import type { Layout, Rect } from "@/components/preview-canvas/types";
 import {
-  alphaHex,
   drawCover,
-  fillRoundedRect,
   fitText,
   roundedRectPath,
-  strokeRoundedRect,
 } from "@/rendering/core/primitives";
+import { drawUnifiedStatusBar } from "@/rendering/core/statusBar";
 import type { DrawFeedSurfaceArgs } from "./types";
 
 export { drawWrappedText } from "@/rendering/core/primitives";
 
-export function drawFeedStatusBar(ctx: CanvasRenderingContext2D, layout: Layout) {
-  const s = layout.scale;
-  const fg = "#1f2430";
-  const muted = alphaHex(fg, 0.28);
-  const timeX = layout.screen.x + 44 * s;
-  const timeY = layout.screen.y + 34 * s;
-  const batteryW = 22 * s;
-  const batteryH = 12 * s;
-  const batteryX = layout.screen.x + layout.screen.w - 58 * s;
-  const batteryY = layout.screen.y + 22 * s;
-  const capW = 2.5 * s;
-  const capH = 5 * s;
-  const signalRight = batteryX - 10 * s;
-  const signalBaseY = batteryY + batteryH - 0 * s;
-  const barW = 2.5 * s;
-  const barGap = 2 * s;
-  const barHeights = [5, 8, 10, 13].map((value) => value * s);
-
-  ctx.fillStyle = fg;
-  ctx.font = `600 ${16 * s}px ${FONT_STACK}`;
-  ctx.fillText("11:13", timeX, timeY);
-
-  barHeights.forEach((height, index) => {
-    const x =
-      signalRight - (barHeights.length - index) * barW - (barHeights.length - 1 - index) * barGap;
-    ctx.fillStyle = index === barHeights.length - 1 ? muted : fg;
-    fillRoundedRect(
-      ctx,
-      {
-        x,
-        y: signalBaseY - height,
-        w: barW,
-        h: height,
-      },
-      1.4 * s
-    );
+export function drawFeedStatusBar(
+  ctx: CanvasRenderingContext2D,
+  layout: Layout,
+  tone: "auto" | "light" | "dark" = "auto"
+) {
+  drawUnifiedStatusBar(ctx, layout, {
+    tone,
+    fallbackTone: "dark",
+    timeLabel: "11:13",
   });
-
-  ctx.strokeStyle = fg;
-  strokeRoundedRect(
-    ctx,
-    {
-      x: batteryX,
-      y: batteryY,
-      w: batteryW,
-      h: batteryH,
-    },
-    6 * s,
-    Math.max(1, 1.6 * s)
-  );
-
-  ctx.fillStyle = muted;
-  fillRoundedRect(
-    ctx,
-    {
-      x: batteryX + 2.5 * s,
-      y: batteryY + 2.5 * s,
-      w: batteryW - 7 * s,
-      h: batteryH - 5 * s,
-    },
-    3 * s
-  );
-
-  ctx.fillStyle = fg;
-  fillRoundedRect(
-    ctx,
-    {
-      x: batteryX + 2.5 * s,
-      y: batteryY + 2.5 * s,
-      w: batteryW - 7 * s,
-      h: batteryH - 5 * s,
-    },
-    3 * s
-  );
-
-  ctx.fillRect(
-    batteryX + batteryW + 1.8 * s,
-    batteryY + (batteryH - capH) / 2,
-    capW,
-    capH
-  );
 }
 
 export async function drawFeedMedia(

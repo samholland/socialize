@@ -12,7 +12,7 @@ type ReelsRenderHelpers = {
   drawStoryStatusBar: (
     ctx: CanvasRenderingContext2D,
     layout: Layout,
-    tone: "light" | "dark",
+    tone: "light" | "dark" | "auto",
     timeLabel?: string
   ) => void;
   drawStoryMedia: (
@@ -99,7 +99,7 @@ function drawReelsHeader(
 
   ctx.fillStyle = "rgba(0,0,0,0)";
   ctx.fillRect(layout.screen.x, layout.screen.y, layout.screen.w, 100 * s);
-  helpers.drawStoryStatusBar(ctx, layout, "light", "9:40");
+  helpers.drawStoryStatusBar(ctx, layout, "auto");
 
   const tabsY = layout.screen.y + 79 * s;
 

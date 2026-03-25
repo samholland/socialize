@@ -23,6 +23,7 @@ function drawCaptionBlock(
     y,
     maxWidth,
     maxLines,
+    draw = true,
     lineHeight,
     username,
     body,
@@ -31,26 +32,27 @@ function drawCaptionBlock(
     x: number;
     y: number;
     maxWidth: number;
-    maxLines: number;
+    maxLines?: number;
+    draw?: boolean;
     lineHeight: number;
     username: string;
     body: string;
     scale: number;
   }
-) {
+): number {
+  const resolvedMaxLines = Number.isFinite(maxLines) ? Math.max(1, Math.floor(maxLines ?? 1)) : Number.POSITIVE_INFINITY;
   const name = fitText(username || "brand", 22);
   const text = body.trim();
   if (!text) {
     ctx.fillStyle = "#1f1f1f";
     ctx.font = `700 ${12.5 * scale}px ${FONT_STACK}`;
     ctx.fillText(name, x, y);
-    return;
+    return 1;
   }
 
-  const words = text.split(/\s+/).filter(Boolean);
   const lines: Array<{ includeName: boolean; text: string }> = [];
-  let wordIndex = 0;
   let isFirstLine = true;
+  let truncated = false;
 
   const measureLine = (lineText: string, includeName: boolean) => {
     if (!includeName) {
@@ -63,26 +65,52 @@ function drawCaptionBlock(
     return nameWidth + ctx.measureText(` ${lineText}`).width;
   };
 
-  while (lines.length < maxLines && wordIndex < words.length) {
-    let candidate = "";
-    let consumed = 0;
+  const paragraphs = text.split(/\r?\n/);
+  for (let p = 0; p < paragraphs.length; p += 1) {
+    const paragraphWords = paragraphs[p].trim().split(/\s+/).filter(Boolean);
 
-    for (let i = wordIndex; i < words.length; i += 1) {
-      const next = candidate ? `${candidate} ${words[i]}` : words[i];
-      if (measureLine(next, isFirstLine) <= maxWidth || candidate.length === 0) {
-        candidate = next;
-        consumed += 1;
-        continue;
+    if (paragraphWords.length === 0) {
+      if (lines.length < resolvedMaxLines) {
+        lines.push({ includeName: isFirstLine, text: "" });
+        isFirstLine = false;
+      } else {
+        truncated = true;
       }
+      continue;
+    }
+
+    let wordIndex = 0;
+    while (lines.length < resolvedMaxLines && wordIndex < paragraphWords.length) {
+      let candidate = "";
+      let consumed = 0;
+
+      for (let i = wordIndex; i < paragraphWords.length; i += 1) {
+        const next = candidate ? `${candidate} ${paragraphWords[i]}` : paragraphWords[i];
+        if (measureLine(next, isFirstLine) <= maxWidth || candidate.length === 0) {
+          candidate = next;
+          consumed += 1;
+          continue;
+        }
+        break;
+      }
+
+      lines.push({ includeName: isFirstLine, text: candidate });
+      wordIndex += consumed;
+      isFirstLine = false;
+    }
+
+    if (wordIndex < paragraphWords.length) {
+      truncated = true;
       break;
     }
 
-    lines.push({ includeName: isFirstLine, text: candidate });
-    wordIndex += consumed;
-    isFirstLine = false;
+    if (lines.length >= resolvedMaxLines && p < paragraphs.length - 1) {
+      truncated = true;
+      break;
+    }
   }
 
-  if (wordIndex < words.length && lines.length > 0) {
+  if (Number.isFinite(resolvedMaxLines) && truncated && lines.length > 0) {
     const lastIndex = lines.length - 1;
     let trimmed = lines[lastIndex].text;
     while (trimmed.length > 0) {
@@ -96,22 +124,26 @@ function drawCaptionBlock(
     if (!lines[lastIndex].text.endsWith("...")) lines[lastIndex].text = "...";
   }
 
-  lines.forEach((line, index) => {
-    const lineY = y + index * lineHeight;
-    if (line.includeName) {
-      ctx.fillStyle = "#1f1f1f";
-      ctx.font = `700 ${12.5 * scale}px ${FONT_STACK}`;
-      ctx.fillText(name, x, lineY);
-      const nameWidth = ctx.measureText(name).width;
-      ctx.font = `500 ${12.5 * scale}px ${FONT_STACK}`;
-      ctx.fillText(` ${line.text}`, x + nameWidth, lineY);
-      return;
-    }
+  if (draw) {
+    lines.forEach((line, index) => {
+      const lineY = y + index * lineHeight;
+      if (line.includeName) {
+        ctx.fillStyle = "#1f1f1f";
+        ctx.font = `700 ${12.5 * scale}px ${FONT_STACK}`;
+        ctx.fillText(name, x, lineY);
+        const nameWidth = ctx.measureText(name).width;
+        ctx.font = `500 ${12.5 * scale}px ${FONT_STACK}`;
+        ctx.fillText(` ${line.text}`, x + nameWidth, lineY);
+        return;
+      }
 
-    ctx.fillStyle = "#1f1f1f";
-    ctx.font = `500 ${12.5 * scale}px ${FONT_STACK}`;
-    ctx.fillText(line.text, x, lineY);
-  });
+      ctx.fillStyle = "#1f1f1f";
+      ctx.font = `500 ${12.5 * scale}px ${FONT_STACK}`;
+      ctx.fillText(line.text, x, lineY);
+    });
+  }
+
+  return Math.max(1, lines.length);
 }
 
 function facebookDomainLabel(rawUrl: string, fallbackName: string): string {
@@ -142,27 +174,42 @@ function drawUntruncatedWrappedText(
   x: number,
   y: number,
   maxWidth: number,
-  lineHeight: number
+  lineHeight: number,
+  preserveLineBreaks = false
 ): number {
-  const words = text.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return 0;
+  const wrapWords = (content: string): string[] => {
+    const words = content.trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) return [];
 
-  const lines: string[] = [];
-  let current = words[0];
+    const lines: string[] = [];
+    let current = words[0];
 
-  for (let i = 1; i < words.length; i += 1) {
-    const candidate = `${current} ${words[i]}`;
-    if (ctx.measureText(candidate).width <= maxWidth) {
-      current = candidate;
-    } else {
-      lines.push(current);
-      current = words[i];
+    for (let i = 1; i < words.length; i += 1) {
+      const candidate = `${current} ${words[i]}`;
+      if (ctx.measureText(candidate).width <= maxWidth) {
+        current = candidate;
+      } else {
+        lines.push(current);
+        current = words[i];
+      }
     }
-  }
-  lines.push(current);
+    lines.push(current);
+    return lines;
+  };
+
+  const lines = preserveLineBreaks
+    ? text.split(/\r?\n/).flatMap((paragraph) => {
+        const wrapped = wrapWords(paragraph);
+        return wrapped.length > 0 ? wrapped : [""];
+      })
+    : wrapWords(text);
+
+  if (lines.length === 0) return 0;
 
   lines.forEach((line, index) => {
-    ctx.fillText(line, x, y + index * lineHeight);
+    if (line) {
+      ctx.fillText(line, x, y + index * lineHeight);
+    }
   });
 
   return lines.length;
@@ -234,11 +281,11 @@ async function drawInstagramFeedSurface(args: DrawFeedSurfaceArgs) {
 
   let y = toolbarY + toolbarH;
 
-  y += 55 * s;
+  y += 50 * s;
   ctx.fillStyle = "#efefef";
   ctx.fillRect(screen.x, y, screen.w, 1 * s);
 
-  const adHeaderY = y + 6 * s;
+  const adHeaderY = y + 0 * s;
   const adHeaderH = 52 * s;
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(screen.x, adHeaderY, screen.w, adHeaderH);
@@ -275,10 +322,24 @@ async function drawInstagramFeedSurface(args: DrawFeedSurfaceArgs) {
   const mediaY = adHeaderY + adHeaderH;
   const ctaH = 36 * s;
   const actionsH = 40 * s;
-  const captionH = 58 * s;
-  const mediaMaxH = Math.max(130 * s, screen.y + screen.h - navH - ctaH - actionsH - captionH - mediaY);
+  const captionLineHeight = 15 * s;
+  const captionTopPadding = 8 * s;
+  const captionBottomPadding = 10 * s;
+  const captionBody = primaryText || "Write some post copy.";
+  ctx.font = `500 ${12.5 * s}px ${FONT_STACK}`;
+  const captionLines = drawCaptionBlock(ctx, {
+    x: 0,
+    y: 0,
+    maxWidth: screen.w - 28 * s,
+    draw: false,
+    lineHeight: captionLineHeight,
+    username: safeName,
+    body: captionBody,
+    scale: s,
+  });
+  const captionH = captionTopPadding + captionBottomPadding + captionLineHeight * captionLines;
   const mediaTargetH = mediaHeightForAspect(screen.w, mediaAspect);
-  const mediaH = Math.min(mediaTargetH, mediaMaxH);
+  const mediaH = mediaTargetH;
   const mediaRect = { x: screen.x, y: mediaY, w: screen.w, h: mediaH };
 
   await drawFeedMedia(args, mediaRect);
@@ -325,12 +386,11 @@ async function drawInstagramFeedSurface(args: DrawFeedSurfaceArgs) {
 
   drawCaptionBlock(ctx, {
     x: screen.x + 14 * s,
-    y: captionY + 8 * s,
+    y: captionY + captionTopPadding,
     maxWidth: screen.w - 28 * s,
-    maxLines: 3,
-    lineHeight: 15 * s,
+    lineHeight: captionLineHeight,
     username: safeName,
-    body: primaryText || "Write some post copy.",
+    body: captionBody,
     scale: s,
   });
 
@@ -378,16 +438,22 @@ async function drawFacebookFeedSurface(args: DrawFeedSurfaceArgs) {
 
   const s = layout.scale;
   const screen = layout.screen;
-  const [fbLikeIcon, fbCommentIcon, fbShareIcon] = await Promise.all([
+  const [fbLikeIcon, fbCommentIcon, fbShareIcon, fbHomeIcon, fbReelsIcon, fbFriendsIcon, fbMarketplaceIcon, fbNotificationIcon] = await Promise.all([
     loadImageFromUrl("/images/fb_like.svg"),
     loadImageFromUrl("/images/fb_comment.svg"),
     loadImageFromUrl("/images/fb_share.svg"),
+    loadImageFromUrl("/images/fb_home_active.svg"),
+    loadImageFromUrl("/images/fb_reels.svg"),
+    loadImageFromUrl("/images/fb_friends.svg"),
+    loadImageFromUrl("/images/fb_marketplace.svg"),
+    loadImageFromUrl("/images/fb_notification.svg"),
   ]);
 
   clipScreen(ctx, layout);
 
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(screen.x, screen.y, screen.w, screen.h);
+  drawFeedStatusBar(ctx, layout, "auto");
 
   const cardX = screen.x;
   const cardW = screen.w;
@@ -443,17 +509,16 @@ async function drawFacebookFeedSurface(args: DrawFeedSurfaceArgs) {
       cardX + 10 * s,
       y + 16 * s,
       cardW - 20 * s,
-      bodyLineHeight
+      bodyLineHeight,
+      true
     );
     y += bodyLines * bodyLineHeight + 10 * s;
   } else {
     y += 8 * s;
   }
 
-  const reservedBelow = 178 * s;
-  const mediaMaxH = Math.max(120 * s, screen.y + screen.h - y - reservedBelow);
-  const mediaTargetH = mediaHeightForAspect(cardW, mediaAspect);
-  const mediaH = Math.min(mediaMaxH, mediaTargetH);
+  const fbNavH = 68 * s;
+  const mediaH = mediaHeightForAspect(cardW, mediaAspect);
   const mediaRect = { x: cardX, y, w: cardW, h: mediaH };
 
   await drawFeedMedia(args, mediaRect, "Drop media");
@@ -500,17 +565,17 @@ async function drawFacebookFeedSurface(args: DrawFeedSurfaceArgs) {
   y += ctaH;
 
   ctx.fillStyle = "#ffffff";
-  const reactionsH = 26 * s;
+  const reactionsH = 36 * s;
   ctx.fillRect(cardX, y, cardW, reactionsH);
   ctx.fillStyle = "#65676b";
-  ctx.font = `500 ${10 * s}px ${FONT_STACK}`;
-  ctx.fillText("8.6K", cardX + 20 * s, y + 17 * s);
+  ctx.font = `500 ${14 * s}px ${FONT_STACK}`;
+  ctx.fillText("8.6K", cardX + 23 * s, y + 24 * s);
   ctx.textAlign = "right";
-  ctx.fillText("3.7K comments · 588 shares", cardX + cardW - 8 * s, y + 17 * s);
+  ctx.fillText("3.7K comments · 588 shares", cardX + cardW - 8 * s, y + 24 * s);
   ctx.textAlign = "left";
   ctx.fillStyle = "#2f73ff";
   ctx.beginPath();
-  ctx.arc(cardX + 10 * s, y + 13 * s, 6 * s, 0, Math.PI * 2);
+  ctx.arc(cardX + 10 * s, y + 18 * s, 6 * s, 0, Math.PI * 2);
   ctx.fill();
   y += reactionsH;
 
@@ -550,6 +615,40 @@ async function drawFacebookFeedSurface(args: DrawFeedSurfaceArgs) {
   y += actionsH;
   ctx.fillStyle = "#f2f3f5";
   ctx.fillRect(cardX, y, cardW, 1 * s);
+
+  const navY = screen.y + screen.h - fbNavH;
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(cardX, navY - 20, cardW, fbNavH + 3);
+  ctx.fillStyle = "#d9dde3";
+  ctx.fillRect(cardX, navY - 20, cardW, 1 * s);
+
+  const navItems = [
+    { icon: fbHomeIcon, label: "Home", active: true },
+    { icon: fbReelsIcon, label: "Reels", active: false },
+    { icon: fbFriendsIcon, label: "Friends", active: false },
+    { icon: fbMarketplaceIcon, label: "Marketplace", active: false },
+    { icon: fbNotificationIcon, label: "Notifications", active: false },
+  ];
+  const navStep = cardW / navItems.length;
+  const navIconSize = 22 * s;
+  navItems.forEach((item, index) => {
+    const centerX = cardX + navStep * index + navStep / 2;
+    const iconY = navY + 0 * s;
+    if (item.icon) {
+      drawTintedImage(
+        ctx,
+        item.icon,
+        { x: centerX - navIconSize / 2, y: iconY, w: navIconSize, h: navIconSize },
+        item.active ? "#1877f2" : "#1f2328"
+      );
+    }
+
+    ctx.fillStyle = item.active ? "#1877f2" : "#1f2328";
+    ctx.font = `${item.active ? 700 : 600} ${9.2 * s}px ${FONT_STACK}`;
+    ctx.textAlign = "center";
+    ctx.fillText(item.label, centerX, navY + fbNavH - 32 * s);
+  });
+  ctx.textAlign = "left";
 
   endClip(ctx);
 }

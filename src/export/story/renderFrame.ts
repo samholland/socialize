@@ -3,7 +3,6 @@ import {
   STORY_LAYOUT,
 } from "./constants";
 import {
-  alphaHex,
   drawCover,
   drawTintedImage,
   drawWrappedText,
@@ -13,6 +12,7 @@ import {
   roundedRectPath,
   strokeRoundedRect,
 } from "@/rendering/core/primitives";
+import { drawUnifiedStatusBar } from "@/rendering/core/statusBar";
 import { renderInstagramStorySurface } from "./renderers/renderInstagramStorySurface";
 import { renderInstagramReelsSurface } from "./renderers/renderInstagramReelsSurface";
 import { renderTikTokSurface } from "./renderers/renderTikTokSurface";
@@ -92,89 +92,14 @@ function computeLayout(scene: StorySceneModel): Layout {
 function drawStoryStatusBar(
   ctx: CanvasRenderingContext2D,
   layout: Layout,
-  tone: "light" | "dark",
-  timeLabel = "12:13"
+  tone: "light" | "dark" | "auto" = "auto",
+  timeLabel = "11:13"
 ) {
-  const s = layout.scale;
-  const fg = tone === "light" ? "#ffffff" : "#1f2430";
-  const muted = tone === "light" ? "rgba(255,255,255,0.35)" : alphaHex(fg, 0.28);
-  const timeX = layout.screen.x + 38 * s;
-  const timeY = layout.screen.y + 34 * s;
-  const batteryW = 28 * s;
-  const batteryH = 14 * s;
-  const batteryX = layout.screen.x + layout.screen.w - 58 * s;
-  const batteryY = layout.screen.y + 17 * s;
-  const capW = 2.5 * s;
-  const capH = 5 * s;
-  const signalRight = batteryX - 10 * s;
-  const signalBaseY = batteryY + batteryH - 1.5 * s;
-  const barW = 4 * s;
-  const barGap = 2.5 * s;
-  const barHeights = [7, 10, 13, 16].map((value) => value * s);
-
-  ctx.fillStyle = fg;
-  ctx.font = `600 ${16 * s}px ${FONT_STACK}`;
-  ctx.fillText(timeLabel, timeX, timeY);
-
-  barHeights.forEach((height, index) => {
-    const x =
-      signalRight - (barHeights.length - index) * barW - (barHeights.length - 1 - index) * barGap;
-    ctx.fillStyle = index === barHeights.length - 1 ? muted : fg;
-    fillRoundedRect(
-      ctx,
-      {
-        x,
-        y: signalBaseY - height,
-        w: barW,
-        h: height,
-      },
-      1.4 * s
-    );
+  drawUnifiedStatusBar(ctx, layout, {
+    tone,
+    fallbackTone: tone === "light" ? "light" : "dark",
+    timeLabel,
   });
-
-  ctx.strokeStyle = fg;
-  strokeRoundedRect(
-    ctx,
-    {
-      x: batteryX,
-      y: batteryY,
-      w: batteryW,
-      h: batteryH,
-    },
-    6 * s,
-    Math.max(1, 1.6 * s)
-  );
-
-  ctx.fillStyle = muted;
-  fillRoundedRect(
-    ctx,
-    {
-      x: batteryX + 2.5 * s,
-      y: batteryY + 2.5 * s,
-      w: batteryW - 7 * s,
-      h: batteryH - 5 * s,
-    },
-    3 * s
-  );
-
-  ctx.fillStyle = fg;
-  fillRoundedRect(
-    ctx,
-    {
-      x: batteryX + 2.5 * s,
-      y: batteryY + 2.5 * s,
-      w: batteryW - 7 * s,
-      h: batteryH - 5 * s,
-    },
-    3 * s
-  );
-
-  ctx.fillRect(
-    batteryX + batteryW + 1.8 * s,
-    batteryY + (batteryH - capH) / 2,
-    capW,
-    capH
-  );
 }
 
 function drawStoryCtaPill(
@@ -300,6 +225,7 @@ function drawInstagramStorySurface(
     durationMs,
     mediaSource,
     helpers: {
+      drawStoryStatusBar,
       drawStoryMedia,
       drawAvatar,
       drawWrappedText,
