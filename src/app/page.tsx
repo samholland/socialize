@@ -26,7 +26,7 @@ import {
   type CloudAppData,
 } from "@/lib/cloud/workspaces";
 import {
-  deleteLocalMediaAsset,
+  deleteLegacyLocalMediaAssets,
   deleteLocalMediaAssets,
   getLocalWorkspaceState,
   listLocalMediaAssetsForWorkspace,
@@ -162,6 +162,7 @@ const CLOUD_ACTIVE_WS_KEY = "socialize.cloud.activeWs";
 const CLOUD_IMPORT_DONE_PREFIX = "socialize.cloud.import.done.";
 const LOCAL_WORKSPACE_ID = "ws_local";
 const DEFAULT_MOCKUP_BACKDROP = "#ffffff";
+const LOCAL_MEDIA_PATH_PREFIX = "local:";
 
 const PLATFORM_OPTIONS: Platform[] = [
   "Instagram Feed",
@@ -482,6 +483,26 @@ function defaultSelection(data: AppData): Selection {
     projectId: project?.id ?? "",
     campaignId: campaign?.id ?? "",
   };
+}
+
+function isLocalMediaStoragePath(path: string | undefined): path is string {
+  return typeof path === "string" && path.startsWith(LOCAL_MEDIA_PATH_PREFIX);
+}
+
+async function sha256Hex(blob: Blob): Promise<string> {
+  if (typeof crypto === "undefined" || typeof crypto.subtle === "undefined") {
+    return `${blob.size}-${Date.now()}`;
+  }
+  const bytes = await blob.arrayBuffer();
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function localMediaStoragePathForFile(file: File): Promise<string> {
+  const hash = await sha256Hex(file);
+  return `${LOCAL_MEDIA_PATH_PREFIX}${hash}`;
 }
 
 function isQuotaExceededStorageError(error: unknown): boolean {
@@ -1494,6 +1515,48 @@ export default function Home() {
   ]);
 
   useEffect(() => {
+    if (!storageReady) return;
+    if (!activeWorkspaceIsLocal) return;
+    void (async () => {
+      const assets = await listLocalMediaAssetsForWorkspace(activeWorkspaceId);
+      if (assets.length === 0) return;
+      const campaigns = data.clients.flatMap((client) =>
+        client.projects.flatMap((project) => project.campaigns)
+      );
+      const referencedPaths = new Set<string>();
+      const campaignById = new Map(campaigns.map((campaign) => [campaign.id, campaign]));
+      for (const campaign of campaigns) {
+        if (!isLocalMediaStoragePath(campaign.mediaStoragePath)) continue;
+        referencedPaths.add(campaign.mediaStoragePath);
+      }
+
+      const orphanedPaths: string[] = [];
+      const orphanedLegacyCampaignIds: string[] = [];
+      for (const asset of assets) {
+        if (asset.storagePath) {
+          if (!referencedPaths.has(asset.storagePath)) {
+            orphanedPaths.push(asset.storagePath);
+          }
+          continue;
+        }
+        if (asset.campaignId) {
+          const campaign = campaignById.get(asset.campaignId);
+          if (!campaign || isLocalMediaStoragePath(campaign.mediaStoragePath)) {
+            orphanedLegacyCampaignIds.push(asset.campaignId);
+          }
+        }
+      }
+
+      if (orphanedPaths.length > 0) {
+        void deleteLocalMediaAssets(activeWorkspaceId, orphanedPaths);
+      }
+      if (orphanedLegacyCampaignIds.length > 0) {
+        void deleteLegacyLocalMediaAssets(activeWorkspaceId, orphanedLegacyCampaignIds);
+      }
+    })();
+  }, [storageReady, activeWorkspaceIsLocal, activeWorkspaceId, data]);
+
+  useEffect(() => {
     return () => {
       if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
     };
@@ -1638,39 +1701,90 @@ export default function Home() {
     });
   }
 
+  function collectCampaigns(nextData: AppData): Campaign[] {
+    return nextData.clients.flatMap((client) =>
+      client.projects.flatMap((project) => project.campaigns)
+    );
+  }
+
+  function collectReferencedLocalMediaPaths(nextData: AppData): Set<string> {
+    const paths = new Set<string>();
+    for (const campaign of collectCampaigns(nextData)) {
+      if (!isLocalMediaStoragePath(campaign.mediaStoragePath)) continue;
+      paths.add(campaign.mediaStoragePath);
+    }
+    return paths;
+  }
+
   async function hydrateLocalMediaForWorkspace(
     workspaceId: string,
     nextData: AppData
   ) {
+    const campaigns = collectCampaigns(nextData);
     const assets = await listLocalMediaAssetsForWorkspace(workspaceId);
     if (assets.length === 0) {
       replaceCampaignMedia({});
       return;
     }
 
-    const validCampaignIds = new Set(
-      nextData.clients.flatMap((client) =>
-        client.projects.flatMap((project) =>
-          project.campaigns.map((campaign) => campaign.id)
-        )
-      )
-    );
+    const campaignById = new Map(campaigns.map((campaign) => [campaign.id, campaign]));
+    const referencedLocalPaths = collectReferencedLocalMediaPaths(nextData);
+    const orphanedStoragePaths: string[] = [];
+    const orphanedLegacyCampaignIds: string[] = [];
+    const assetsByPath = new Map<string, (typeof assets)[number]>();
+    const assetsByCampaignId = new Map<string, (typeof assets)[number]>();
 
-    const orphanedIds: string[] = [];
-    const nextCampaignMedia: Record<string, PreviewMedia> = {};
     for (const asset of assets) {
-      if (!validCampaignIds.has(asset.campaignId)) {
-        orphanedIds.push(asset.campaignId);
+      if (asset.storagePath) {
+        assetsByPath.set(asset.storagePath, asset);
+        if (!referencedLocalPaths.has(asset.storagePath)) {
+          orphanedStoragePaths.push(asset.storagePath);
+        }
         continue;
       }
-      nextCampaignMedia[asset.campaignId] = {
-        kind: asset.kind,
-        url: URL.createObjectURL(asset.blob),
+      if (asset.campaignId) {
+        assetsByCampaignId.set(asset.campaignId, asset);
+        const campaign = campaignById.get(asset.campaignId);
+        if (!campaign || isLocalMediaStoragePath(campaign.mediaStoragePath)) {
+          orphanedLegacyCampaignIds.push(asset.campaignId);
+        }
+      }
+    }
+
+    const nextCampaignMedia: Record<string, PreviewMedia> = {};
+    for (const campaign of campaigns) {
+      const campaignKind =
+        campaign.mediaKind === "video"
+          ? "video"
+          : campaign.mediaKind === "image"
+            ? "image"
+            : null;
+
+      if (isLocalMediaStoragePath(campaign.mediaStoragePath)) {
+        const asset = assetsByPath.get(campaign.mediaStoragePath);
+        if (!asset) continue;
+        const kind = campaignKind ?? asset.kind;
+        nextCampaignMedia[campaign.id] = {
+          kind,
+          url: URL.createObjectURL(asset.blob),
+        };
+        continue;
+      }
+
+      const legacyAsset = assetsByCampaignId.get(campaign.id);
+      if (!legacyAsset) continue;
+      const kind = campaignKind ?? legacyAsset.kind;
+      nextCampaignMedia[campaign.id] = {
+        kind,
+        url: URL.createObjectURL(legacyAsset.blob),
       };
     }
 
-    if (orphanedIds.length > 0) {
-      void deleteLocalMediaAssets(workspaceId, orphanedIds);
+    if (orphanedStoragePaths.length > 0) {
+      void deleteLocalMediaAssets(workspaceId, orphanedStoragePaths);
+    }
+    if (orphanedLegacyCampaignIds.length > 0) {
+      void deleteLegacyLocalMediaAssets(workspaceId, orphanedLegacyCampaignIds);
     }
     replaceCampaignMedia(nextCampaignMedia);
   }
@@ -1732,9 +1846,6 @@ export default function Home() {
   }
 
   function cleanupCampaignMedia(ids: string[]) {
-    if (activeWorkspaceIsLocal) {
-      void deleteLocalMediaAssets(activeWorkspaceId, ids);
-    }
     setCampaignMediaMap((prev) => {
       const next = { ...prev };
       for (const id of ids) {
@@ -1879,7 +1990,8 @@ export default function Home() {
 
     const url = URL.createObjectURL(file);
     const mediaKind: "image" | "video" = file.type.startsWith("video/") ? "video" : "image";
-    const persisted = await putLocalMediaAsset(activeWorkspaceId, campaignId, {
+    const storagePath = await localMediaStoragePathForFile(file);
+    const persisted = await putLocalMediaAsset(activeWorkspaceId, storagePath, {
       kind: mediaKind,
       blob: file,
       mimeType: file.type,
@@ -1889,6 +2001,25 @@ export default function Home() {
       console.warn("Failed to persist local media in IndexedDB.");
     }
     setCampaignMedia(campaignId, { kind: mediaKind, url });
+    setData((prev) => ({
+      clients: prev.clients.map((client) => ({
+        ...client,
+        projects: client.projects.map((project) => ({
+          ...project,
+          campaigns: project.campaigns.map((campaign) =>
+            campaign.id === campaignId
+              ? {
+                  ...campaign,
+                  mediaStoragePath: storagePath,
+                  mediaKind,
+                  mediaMimeType: file.type,
+                  updatedAt: nowIso(),
+                }
+              : campaign
+          ),
+        })),
+      })),
+    }));
   }
 
   function pickPreviewMedia() {
@@ -4065,8 +4196,6 @@ export default function Home() {
                   void clearCampaignMediaInCloud(campaign.id).catch((error) => {
                     console.error("Failed to clear media", error);
                   });
-                } else {
-                  void deleteLocalMediaAsset(activeWorkspaceId, campaign.id);
                 }
               }}
             >

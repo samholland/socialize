@@ -1,5 +1,5 @@
 const DB_NAME = "socialize.local.db";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const WORKSPACE_STORE = "workspace_states";
 const MEDIA_STORE = "media_assets";
 
@@ -12,7 +12,8 @@ type WorkspaceStateRecord = {
 type MediaAssetRecord = {
   id: string;
   workspaceId: string;
-  campaignId: string;
+  storagePath?: string;
+  campaignId?: string;
   kind: "image" | "video";
   blob: Blob;
   mimeType: string;
@@ -46,6 +47,38 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
   });
 }
 
+function ensureMediaStoreSchema(
+  db: IDBDatabase,
+  transaction: IDBTransaction | null
+) {
+  if (!db.objectStoreNames.contains(MEDIA_STORE)) {
+    const store = db.createObjectStore(MEDIA_STORE, { keyPath: "id" });
+    store.createIndex("workspaceId", "workspaceId", { unique: false });
+    store.createIndex("storagePath", ["workspaceId", "storagePath"], {
+      unique: true,
+    });
+    store.createIndex("campaignId", ["workspaceId", "campaignId"], {
+      unique: false,
+    });
+    return;
+  }
+  if (!transaction) return;
+  const store = transaction.objectStore(MEDIA_STORE);
+  if (!store.indexNames.contains("workspaceId")) {
+    store.createIndex("workspaceId", "workspaceId", { unique: false });
+  }
+  if (!store.indexNames.contains("storagePath")) {
+    store.createIndex("storagePath", ["workspaceId", "storagePath"], {
+      unique: true,
+    });
+  }
+  if (!store.indexNames.contains("campaignId")) {
+    store.createIndex("campaignId", ["workspaceId", "campaignId"], {
+      unique: false,
+    });
+  }
+}
+
 function openDb(): Promise<IDBDatabase> {
   if (!hasIndexedDb()) {
     return Promise.reject(new Error("IndexedDB is not available."));
@@ -56,13 +89,11 @@ function openDb(): Promise<IDBDatabase> {
     const request = window.indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
+      const tx = request.transaction;
       if (!db.objectStoreNames.contains(WORKSPACE_STORE)) {
         db.createObjectStore(WORKSPACE_STORE, { keyPath: "workspaceId" });
       }
-      if (!db.objectStoreNames.contains(MEDIA_STORE)) {
-        const store = db.createObjectStore(MEDIA_STORE, { keyPath: "id" });
-        store.createIndex("workspaceId", "workspaceId", { unique: false });
-      }
+      ensureMediaStoreSchema(db, tx);
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () =>
@@ -72,7 +103,11 @@ function openDb(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
-function mediaId(workspaceId: string, campaignId: string): string {
+function mediaId(workspaceId: string, storagePath: string): string {
+  return `${workspaceId}::${storagePath}`;
+}
+
+function legacyMediaId(workspaceId: string, campaignId: string): string {
   return `${workspaceId}::${campaignId}`;
 }
 
@@ -138,7 +173,7 @@ export async function setLocalWorkspaceState<T>(
 
 export async function putLocalMediaAsset(
   workspaceId: string,
-  campaignId: string,
+  storagePath: string,
   media: {
     kind: "image" | "video";
     blob: Blob;
@@ -152,9 +187,9 @@ export async function putLocalMediaAsset(
     const transaction = db.transaction(MEDIA_STORE, "readwrite");
     const store = transaction.objectStore(MEDIA_STORE);
     store.put({
-      id: mediaId(workspaceId, campaignId),
+      id: mediaId(workspaceId, storagePath),
       workspaceId,
-      campaignId,
+      storagePath,
       kind: media.kind,
       blob: media.blob,
       mimeType: media.mimeType,
@@ -183,6 +218,7 @@ export async function listLocalMediaAssetsForWorkspace(
     await transactionDone(transaction);
     return records.map((record) => ({
       workspaceId: record.workspaceId,
+      storagePath: record.storagePath,
       campaignId: record.campaignId,
       kind: record.kind,
       blob: record.blob,
@@ -197,14 +233,14 @@ export async function listLocalMediaAssetsForWorkspace(
 
 export async function deleteLocalMediaAsset(
   workspaceId: string,
-  campaignId: string
+  storagePath: string
 ): Promise<void> {
   if (!hasIndexedDb()) return;
   try {
     const db = await openDb();
     const transaction = db.transaction(MEDIA_STORE, "readwrite");
     const store = transaction.objectStore(MEDIA_STORE);
-    store.delete(mediaId(workspaceId, campaignId));
+    store.delete(mediaId(workspaceId, storagePath));
     await transactionDone(transaction);
   } catch {
     // noop
@@ -212,6 +248,24 @@ export async function deleteLocalMediaAsset(
 }
 
 export async function deleteLocalMediaAssets(
+  workspaceId: string,
+  storagePaths: string[]
+): Promise<void> {
+  if (!hasIndexedDb() || storagePaths.length === 0) return;
+  try {
+    const db = await openDb();
+    const transaction = db.transaction(MEDIA_STORE, "readwrite");
+    const store = transaction.objectStore(MEDIA_STORE);
+    for (const storagePath of storagePaths) {
+      store.delete(mediaId(workspaceId, storagePath));
+    }
+    await transactionDone(transaction);
+  } catch {
+    // noop
+  }
+}
+
+export async function deleteLegacyLocalMediaAssets(
   workspaceId: string,
   campaignIds: string[]
 ): Promise<void> {
@@ -221,7 +275,7 @@ export async function deleteLocalMediaAssets(
     const transaction = db.transaction(MEDIA_STORE, "readwrite");
     const store = transaction.objectStore(MEDIA_STORE);
     for (const campaignId of campaignIds) {
-      store.delete(mediaId(workspaceId, campaignId));
+      store.delete(legacyMediaId(workspaceId, campaignId));
     }
     await transactionDone(transaction);
   } catch {
