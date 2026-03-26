@@ -294,14 +294,20 @@ export function renderStoryExportFrame(
   assets: StoryExportAssets,
   elapsedMs: number,
   durationMs: number,
-  mediaSource?: StoryFrameMediaSource
+  mediaSource?: StoryFrameMediaSource,
+  options?: {
+    backdropColor?: string;
+    transparentBackdrop?: boolean;
+  }
 ) {
   const layout = computeLayout(scene);
   const { width: outputW, height: outputH } = scene.coordinateSpace;
 
   ctx.clearRect(0, 0, outputW, outputH);
-  ctx.fillStyle = "#d8dbe0";
-  ctx.fillRect(0, 0, outputW, outputH);
+  if (!options?.transparentBackdrop) {
+    ctx.fillStyle = normalizeHexColor(options?.backdropColor, "#ffffff");
+    ctx.fillRect(0, 0, outputW, outputH);
+  }
 
   ctx.save();
   roundedRectPath(

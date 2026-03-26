@@ -16,9 +16,6 @@ import {
   type PreviewCanvasHandle,
 } from "@/components/PreviewCanvas";
 import { AuthGate } from "@/components/AuthGate";
-import {
-  exportInstagramStoryVideoWebm,
-} from "@/export/story/exportImageStoryVideo";
 import { getBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import {
@@ -131,6 +128,7 @@ const WS_DATA_PREFIX = "socialize.ws.";
 const CLOUD_ACTIVE_WS_KEY = "socialize.cloud.activeWs";
 const CLOUD_IMPORT_DONE_PREFIX = "socialize.cloud.import.done.";
 const LOCAL_WORKSPACE_ID = "ws_local";
+const DEFAULT_MOCKUP_BACKDROP = "#ffffff";
 
 const PLATFORM_OPTIONS: Platform[] = [
   "Instagram Feed",
@@ -648,6 +646,8 @@ type UiPrefs = {
   igFeedOverlayScale: number;
   igFeedOverlayOffsetX: number;
   igFeedOverlayOffsetY: number;
+  mockupBackdropColor: string;
+  transparentPngExport: boolean;
 };
 
 function loadUiPrefs(): UiPrefs {
@@ -659,6 +659,8 @@ function loadUiPrefs(): UiPrefs {
     igFeedOverlayScale: 1,
     igFeedOverlayOffsetX: 0,
     igFeedOverlayOffsetY: 0,
+    mockupBackdropColor: DEFAULT_MOCKUP_BACKDROP,
+    transparentPngExport: false,
   };
   if (typeof window === "undefined") return fallback;
   try {
@@ -672,6 +674,8 @@ function loadUiPrefs(): UiPrefs {
       igFeedOverlayScale?: number;
       igFeedOverlayOffsetX?: number;
       igFeedOverlayOffsetY?: number;
+      mockupBackdropColor?: string;
+      transparentPngExport?: boolean;
     };
     const opacity =
       typeof parsed.igFeedOverlayOpacity === "number"
@@ -700,6 +704,14 @@ function loadUiPrefs(): UiPrefs {
       igFeedOverlayScale: scale,
       igFeedOverlayOffsetX: offsetX,
       igFeedOverlayOffsetY: offsetY,
+      mockupBackdropColor:
+        typeof parsed.mockupBackdropColor === "string"
+          ? normalizeHex(parsed.mockupBackdropColor, DEFAULT_MOCKUP_BACKDROP)
+          : fallback.mockupBackdropColor,
+      transparentPngExport:
+        typeof parsed.transparentPngExport === "boolean"
+          ? parsed.transparentPngExport
+          : fallback.transparentPngExport,
     };
   } catch {
     return fallback;
@@ -978,6 +990,8 @@ export default function Home() {
     setIgFeedOverlayScale(ui.igFeedOverlayScale);
     setIgFeedOverlayOffsetX(ui.igFeedOverlayOffsetX);
     setIgFeedOverlayOffsetY(ui.igFeedOverlayOffsetY);
+    setMockupBackdropColor(ui.mockupBackdropColor);
+    setTransparentPngExport(ui.transparentPngExport);
   }, []);
 
   // Local-only bootstrap
@@ -1112,6 +1126,7 @@ export default function Home() {
 
   // Export panel
   const [exportPanelOpen, setExportPanelOpen] = useState(false);
+  const [isVideoRecordingExport, setIsVideoRecordingExport] = useState(false);
 
   // Undo
   const [pendingUndo, setPendingUndo] = useState<PendingUndo | null>(null);
@@ -1123,6 +1138,8 @@ export default function Home() {
   const [igFeedOverlayScale, setIgFeedOverlayScale] = useState(1);
   const [igFeedOverlayOffsetX, setIgFeedOverlayOffsetX] = useState(0);
   const [igFeedOverlayOffsetY, setIgFeedOverlayOffsetY] = useState(0);
+  const [mockupBackdropColor, setMockupBackdropColor] = useState(DEFAULT_MOCKUP_BACKDROP);
+  const [transparentPngExport, setTransparentPngExport] = useState(false);
 
   // Inline renaming
   const [editingName, setEditingName] = useState<EditingName | null>(null);
@@ -1231,6 +1248,8 @@ export default function Home() {
         igFeedOverlayScale,
         igFeedOverlayOffsetX,
         igFeedOverlayOffsetY,
+        mockupBackdropColor,
+        transparentPngExport,
       })
     );
   }, [
@@ -1242,6 +1261,8 @@ export default function Home() {
     igFeedOverlayScale,
     igFeedOverlayOffsetX,
     igFeedOverlayOffsetY,
+    mockupBackdropColor,
+    transparentPngExport,
   ]);
 
   useEffect(() => {
@@ -2440,32 +2461,23 @@ export default function Home() {
     }
   }
 
-  async function exportStoryVideoWebm(
-    campaign: Campaign,
-    client: Client,
+  async function exportCompositedVideoWebm(
     media: PreviewMedia
   ): Promise<Blob | null> {
-    if (campaign.platform !== "Instagram Story") return null;
     if (media.kind !== "video") {
-      alert("Story WebM export is available when the ad media is a video.");
+      alert("Composited video export is available when the ad media is a video.");
       return null;
     }
 
+    setIsVideoRecordingExport(true);
     try {
-      return await exportInstagramStoryVideoWebm({
-        clientName: client.name,
-        clientAvatarUrl: client.profileImageDataUrl,
-        primaryText: campaign.primaryText,
-        cta: campaign.cta,
-        ctaVisible: campaign.ctaVisible,
-        ctaBgColor: campaign.ctaBgColor,
-        ctaTextColor: campaign.ctaTextColor,
-        media,
-      });
+      return await canvasRef.current?.exportVideoWebm() ?? null;
     } catch (error) {
-      console.warn("Story video export failed.", error);
-      alert("Unable to export Story video on this browser.");
+      console.warn("Composited video export failed.", error);
+      alert("Unable to export composited video on this browser.");
       return null;
+    } finally {
+      setIsVideoRecordingExport(false);
     }
   }
 
@@ -3759,6 +3771,54 @@ export default function Home() {
               </button>
             </div>
           )}
+          <label
+            title="Mockup backdrop color"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 12,
+              color: "var(--ink-2)",
+            }}
+          >
+            Backdrop
+            <input
+              type="color"
+              value={mockupBackdropColor}
+              onChange={(e) =>
+                setMockupBackdropColor(
+                  normalizeHex(e.target.value, DEFAULT_MOCKUP_BACKDROP)
+                )
+              }
+              style={{
+                width: 28,
+                height: 22,
+                border: "1px solid var(--line-strong)",
+                borderRadius: 6,
+                padding: 0,
+                background: "transparent",
+                cursor: "pointer",
+              }}
+            />
+          </label>
+          <label
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 12,
+              color: "var(--ink-2)",
+              userSelect: "none",
+            }}
+            title="PNG exports will use a transparent backdrop outside the phone frame"
+          >
+            <input
+              type="checkbox"
+              checked={transparentPngExport}
+              onChange={(e) => setTransparentPngExport(e.target.checked)}
+            />
+            Transparent PNG
+          </label>
           <div className="zoom-controls">
             <button
               className="zoom-btn"
@@ -3810,6 +3870,8 @@ export default function Home() {
                   instagramFeedOverlayScale={igFeedOverlayScale}
                   instagramFeedOverlayOffsetX={igFeedOverlayOffsetX}
                   instagramFeedOverlayOffsetY={igFeedOverlayOffsetY}
+                  mockupBackdropColor={mockupBackdropColor}
+                  transparentPngExport={transparentPngExport}
                   onMediaChange={(m) => setCampaignMedia(campaign.id, m)}
                 />
               </div>
@@ -3977,25 +4039,22 @@ export default function Home() {
                 </div>
               </button>
 
-              {selectedCampaign.platform === "Instagram Story" && isVideo && (
+              {isVideo && (
                 <button
                   className="export-option"
+                  disabled={isVideoRecordingExport}
                   onClick={async () => {
                     close();
-                    const blob = await exportStoryVideoWebm(
-                      selectedCampaign,
-                      selectedClient,
-                      selectedMedia
-                    );
+                    const blob = await exportCompositedVideoWebm(selectedMedia);
                     if (blob) {
-                      triggerDownload(blob, `${slugify(selectedCampaign.name)}_story.webm`);
+                      triggerDownload(blob, `${slugify(selectedCampaign.name)}_composited.webm`);
                     }
                   }}
                 >
                   <div className="export-option-icon">🎞️</div>
                   <div className="export-option-text">
-                    <div className="export-option-label">Export Story video (.webm)</div>
-                    <div className="export-option-desc">Composited Story mockup from uploaded video media</div>
+                    <div className="export-option-label">Export composited video (.webm)</div>
+                    <div className="export-option-desc">Rendered phone mockup video for this platform</div>
                   </div>
                 </button>
               )}
@@ -4314,6 +4373,13 @@ export default function Home() {
           <button className="toast-undo" onClick={handleUndo}>
             Undo
           </button>
+        </div>
+      )}
+
+      {isVideoRecordingExport && (
+        <div className="recording-badge" aria-live="polite" role="status">
+          <span className="recording-dot" />
+          Recording...
         </div>
       )}
     </div>

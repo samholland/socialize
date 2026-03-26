@@ -133,15 +133,51 @@ export function renderInstagramStorySurface({
   const barX = layout.screen.x + STORY_LAYOUT.progressLeftRight * sx;
   const barY = layout.screen.y + STORY_LAYOUT.progressTop * sy;
   const barW = (layout.screen.w - STORY_LAYOUT.progressLeftRight * 2 * sx - barGap * 3) / 4;
+  const barH = STORY_LAYOUT.progressHeight * sy;
+  const progress = Math.max(
+    0,
+    Math.min(1, durationMs > 0 ? elapsedMs / durationMs : 0)
+  );
+
   for (let i = 0; i < 4; i += 1) {
-    ctx.fillStyle = i < 2 ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.25)";
+    ctx.fillStyle = "rgba(255,255,255,0.25)";
     helpers.fillRoundedRect(
       ctx,
       {
         x: barX + i * (barW + barGap),
         y: barY,
         w: barW,
-        h: STORY_LAYOUT.progressHeight * sy,
+        h: barH,
+      },
+      sy
+    );
+  }
+
+  for (let i = 0; i < 2; i += 1) {
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    helpers.fillRoundedRect(
+      ctx,
+      {
+        x: barX + i * (barW + barGap),
+        y: barY,
+        w: barW,
+        h: barH,
+      },
+      sy
+    );
+  }
+
+  const activeBarX = barX + 2 * (barW + barGap);
+  const activeFillW = Math.max(0, Math.min(barW, barW * progress));
+  if (activeFillW > 0) {
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    helpers.fillRoundedRect(
+      ctx,
+      {
+        x: activeBarX,
+        y: barY,
+        w: activeFillW,
+        h: barH,
       },
       sy
     );

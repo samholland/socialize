@@ -21,6 +21,7 @@ export type { PreviewMedia } from "./preview-canvas/types";
 
 export type PreviewCanvasHandle = {
   exportCanvas: () => Promise<Blob | null>;
+  exportVideoWebm: () => Promise<Blob | null>;
 };
 
 type Props = {
@@ -43,8 +44,147 @@ type Props = {
   instagramFeedOverlayScale?: number;
   instagramFeedOverlayOffsetX?: number;
   instagramFeedOverlayOffsetY?: number;
+  mockupBackdropColor?: string;
+  transparentPngExport?: boolean;
   onMediaChange: (media: PreviewMedia) => void;
 };
+
+const VIDEO_EXPORT = {
+  fps: 30,
+  videoBitsPerSecond: 8_000_000,
+} as const;
+
+function pickSupportedVideoMimeType(): string | null {
+  if (typeof MediaRecorder === "undefined") return null;
+  const candidates = [
+    "video/webm;codecs=vp9",
+    "video/webm;codecs=vp8",
+    "video/webm",
+  ];
+  for (const candidate of candidates) {
+    if (MediaRecorder.isTypeSupported(candidate)) return candidate;
+  }
+  return null;
+}
+
+function waitForVideoReady(video: HTMLVideoElement): Promise<void> {
+  if (video.readyState >= 3) return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    const onReady = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error("Unable to load source video."));
+    };
+    const cleanup = () => {
+      video.removeEventListener("canplay", onReady);
+      video.removeEventListener("loadedmetadata", onReady);
+      video.removeEventListener("error", onError);
+    };
+    video.addEventListener("canplay", onReady, { once: true });
+    video.addEventListener("loadedmetadata", onReady, { once: true });
+    video.addEventListener("error", onError, { once: true });
+  });
+}
+
+function seekVideo(video: HTMLVideoElement, timeSec: number): Promise<void> {
+  const target = Math.max(0, timeSec);
+  if (Math.abs(video.currentTime - target) < 0.01) {
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => {
+    const onSeeked = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      resolve();
+    };
+    const cleanup = () => {
+      video.removeEventListener("seeked", onSeeked);
+      video.removeEventListener("error", onError);
+    };
+    video.addEventListener("seeked", onSeeked, { once: true });
+    video.addEventListener("error", onError, { once: true });
+    try {
+      video.currentTime = target;
+    } catch {
+      cleanup();
+      resolve();
+    }
+  });
+}
+
+async function recordCanvasVideoWebmUntilVideoEnds(
+  canvas: HTMLCanvasElement,
+  video: HTMLVideoElement,
+  drawFrame: () => void
+): Promise<Blob> {
+  const mimeType = pickSupportedVideoMimeType();
+  if (!mimeType) {
+    throw new Error("This browser does not support WebM recording.");
+  }
+
+  const stream = canvas.captureStream(VIDEO_EXPORT.fps);
+  const chunks: BlobPart[] = [];
+  let recorder: MediaRecorder | null = null;
+  let rafId = 0;
+
+  try {
+    recorder = new MediaRecorder(stream, {
+      mimeType,
+      videoBitsPerSecond: VIDEO_EXPORT.videoBitsPerSecond,
+    });
+
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      recorder!.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) chunks.push(event.data);
+      };
+      recorder!.onerror = () => {
+        reject(new Error("MediaRecorder failed while exporting video."));
+      };
+      recorder!.onstop = () => {
+        const result = new Blob(chunks, { type: "video/webm" });
+        if (!result.size) {
+          reject(new Error("Export produced an empty video."));
+          return;
+        }
+        resolve(result);
+      };
+      const stopRecorder = () => {
+        if (recorder && recorder.state !== "inactive") {
+          recorder.stop();
+        }
+      };
+      const onVideoEnded = () => stopRecorder();
+      const onVideoError = () => {
+        reject(new Error("Source video failed during export."));
+      };
+
+      const frame = () => {
+        drawFrame();
+        rafId = window.requestAnimationFrame(frame);
+      };
+
+      video.addEventListener("ended", onVideoEnded, { once: true });
+      video.addEventListener("error", onVideoError, { once: true });
+      recorder!.start(250);
+      frame();
+      void video.play().catch(() => {
+        stopRecorder();
+      });
+    });
+
+    return blob;
+  } finally {
+    if (rafId) window.cancelAnimationFrame(rafId);
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+    for (const track of stream.getTracks()) track.stop();
+  }
+}
 
 export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function PreviewCanvas(
   {
@@ -67,6 +207,8 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     instagramFeedOverlayScale = 1,
     instagramFeedOverlayOffsetX = 0,
     instagramFeedOverlayOffsetY = 0,
+    mockupBackdropColor = "#ffffff",
+    transparentPngExport = false,
     onMediaChange,
   }: Props,
   ref
@@ -77,7 +219,9 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const frameImageRef = useRef<HTMLImageElement | null>(null);
-  const drawRef = useRef<(includeDebugOverlays?: boolean) => Promise<void>>(async () => {});
+  const drawRef = useRef<
+    (includeDebugOverlays?: boolean, transparentBackdrop?: boolean) => Promise<void>
+  >(async () => {});
 
   const [isDragging, setIsDragging] = useState(false);
   const [frameVersion, setFrameVersion] = useState(0);
@@ -158,7 +302,10 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     ctx.restore();
   }
 
-  async function draw(includeDebugOverlays = true) {
+  async function draw(
+    includeDebugOverlays = true,
+    transparentBackdrop = false
+  ) {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -167,8 +314,10 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     canvas.width = CANVAS_W;
     canvas.height = CANVAS_H;
 
-    ctx.fillStyle = "#d8dbe0";
-    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+    if (!transparentBackdrop) {
+      ctx.fillStyle = normalizeHexColor(mockupBackdropColor, "#ffffff");
+      ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+    }
 
     const resolvedCtaBgColor = normalizeHexColor(ctaBgColor, "#4f94aa");
     const resolvedCtaTextColor = normalizeHexColor(ctaTextColor, "#ffffff");
@@ -189,6 +338,8 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
         video: videoRef.current,
         frameImage: frameImageRef.current,
         loadImageFromUrl,
+        backdropColor: normalizeHexColor(mockupBackdropColor, "#ffffff"),
+        transparentBackdrop,
       });
     } else {
       await drawFeedSurface({
@@ -244,10 +395,43 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     async exportCanvas(): Promise<Blob | null> {
       const canvas = canvasRef.current;
       if (!canvas) return null;
-      await drawRef.current(false);
+      await drawRef.current(false, transparentPngExport);
       return new Promise<Blob | null>((resolve) =>
         canvas.toBlob((b) => resolve(b), "image/png", 1)
       );
+    },
+    async exportVideoWebm(): Promise<Blob | null> {
+      const canvas = canvasRef.current;
+      const video = videoRef.current;
+      if (!canvas || !video || media.kind !== "video") return null;
+
+      const wasPaused = video.paused;
+      const previousLoop = video.loop;
+      const previousTime = video.currentTime;
+      video.loop = false;
+
+      try {
+        await waitForVideoReady(video);
+        await seekVideo(video, 0);
+        return await recordCanvasVideoWebmUntilVideoEnds(canvas, video, () => {
+          void drawRef.current(false);
+        });
+      } finally {
+        video.pause();
+        video.loop = previousLoop;
+        if (Number.isFinite(previousTime)) {
+          try {
+            await seekVideo(video, previousTime);
+          } catch {
+            // noop
+          }
+        }
+        if (!wasPaused || previousLoop) {
+          void video.play().catch(() => {
+            // noop
+          });
+        }
+      }
     },
   }));
 
@@ -285,6 +469,8 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     instagramFeedOverlayScale,
     instagramFeedOverlayOffsetX,
     instagramFeedOverlayOffsetY,
+    mockupBackdropColor,
+    transparentPngExport,
     isDragging,
     frameVersion,
   ]);
@@ -406,6 +592,7 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
         <video
           ref={videoRef}
           src={media.url}
+          crossOrigin="anonymous"
           muted
           playsInline
           autoPlay

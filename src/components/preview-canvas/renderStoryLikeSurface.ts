@@ -26,6 +26,8 @@ type DrawStoryLikeSurfaceArgs = {
   video: HTMLVideoElement | null;
   frameImage: HTMLImageElement | null;
   loadImageFromUrl: (url: string | undefined) => Promise<HTMLImageElement | null>;
+  backdropColor: string;
+  transparentBackdrop: boolean;
 };
 
 export async function drawStoryLikeSurface({
@@ -42,6 +44,8 @@ export async function drawStoryLikeSurface({
   video,
   frameImage,
   loadImageFromUrl,
+  backdropColor,
+  transparentBackdrop,
 }: DrawStoryLikeSurfaceArgs) {
   const scene = buildStorySceneModel({
     surface,
@@ -118,6 +122,10 @@ export async function drawStoryLikeSurface({
     assets,
     elapsedMs,
     durationMs,
-    mediaSource
+    mediaSource,
+    {
+      backdropColor,
+      transparentBackdrop,
+    }
   );
 }

@@ -256,7 +256,7 @@ html, body {
 
 .tree-row-client,
 .tree-row-project {
-  border-bottom: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line);
   border-radius: 0;
 }
 
@@ -358,7 +358,7 @@ html, body {
   flex: 1;
   min-width: 0;
   font-size: 14px;
-  color: #121212;
+  color: var(--ink);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -374,7 +374,7 @@ html, body {
 
 .tree-label-client {
   font-weight: 500;
-  color: #121212;
+  color: var(--ink);
   font-size: 18px;
   letter-spacing:-0.3px;
 }
@@ -384,13 +384,13 @@ html, body {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: #121212;
+  color: var(--ink-2);
 }
 
 .tree-label-campaign {
   font-size: 13.5px;
   font-weight: 400;
-  color: #121212;
+  color: var(--ink-2);
 }
 
 .tree-campaign-main {
@@ -426,7 +426,7 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #121212;
+  color: var(--ink-2);
   transition: transform var(--t);
   border: none;
   background: transparent;
@@ -482,7 +482,7 @@ html, body {
   border: none;
   background: transparent;
   cursor: pointer;
-  color: #121212;
+  color: var(--ink-2);
   font-size: 14px;
   font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
   font-weight: 400;
@@ -491,12 +491,12 @@ html, body {
 }
 .tree-add-row:hover { background: rgba(0, 122, 255, 0.08); color: var(--accent); }
 .tree-add-row-project,
-.tree-add-row-campaign { padding-left: 0px; color: #999999; font-size: 12.5px}
+.tree-add-row-campaign { padding-left: 0px; color: var(--muted); font-size: 12.5px}
 .tree-add-row-project {
   font-weight: 700;
   padding-top: 8px;
   padding-bottom: 10px;
-  border-bottom: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line);
   border-radius: 0;
 }
 
@@ -506,13 +506,19 @@ html, body {
   font-weight: 700;
   padding: 2px 6px;
   border-radius: 4px;
-  border: 1px #d3d3d3 solid;
-  background: #f3f3f3;
-  color: #7a7a80;
+  border: 1px solid var(--line-strong);
+  background: var(--pane-alt);
+  color: var(--ink-3);
   letter-spacing: 0.01em;
   flex-shrink: 0;
   margin-left: 3px;
   text-transform: uppercase;
+}
+
+[data-theme="dark"] .tree-row-client,
+[data-theme="dark"] .tree-row-project,
+[data-theme="dark"] .tree-add-row-project {
+  border-bottom-color: rgba(255, 255, 255, 0.12);
 }
 
 /* ─── Empty State ────────────────────────────────────────────── */
@@ -692,9 +698,8 @@ html, body {
   gap: 8px;
 }
 .color-swatch {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--r-sm);
+  width: 28px;
+  height: 28px;
   border: 1.5px solid var(--line-strong);
   cursor: pointer;
   flex-shrink: 0;
@@ -706,13 +711,26 @@ html, body {
   justify-content: center;
 }
 .color-swatch input[type="color"] {
-  width: 200%;
-  height: 200%;
+  width: 100%;
+  height: 100%;
+  display: block;
   border: none;
   padding: 0;
+  margin: 0;
   cursor: pointer;
-  transform: translate(-25%, -25%);
+  background: transparent;
+  appearance: none;
+  -webkit-appearance: none;
   outline: none;
+}
+.color-swatch input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.color-swatch input[type="color"]::-webkit-color-swatch {
+  border: none;
+}
+.color-swatch input[type="color"]::-moz-color-swatch {
+  border: none;
 }
 
 /* ─── Buttons ────────────────────────────────────────────────── */
@@ -1054,7 +1072,7 @@ html, body {
   align-items: center;
   padding: 24px 16px 32px;
   gap: 14px;
-  background: var(--bg);
+  background: #fff;
 }
 
 .preview-body::-webkit-scrollbar { width: 4px; }
@@ -1520,6 +1538,39 @@ html, body {
 }
 .toast-undo:hover { color: #7dd6fb; }
 
+.recording-badge {
+  position: fixed;
+  right: 18px;
+  bottom: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.78);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  z-index: 210;
+  box-shadow: var(--shadow);
+  pointer-events: none;
+}
+
+[data-theme="dark"] .recording-badge {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.recording-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ff3b30;
+  box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.55);
+  animation: recording-pulse 1.2s ease-out infinite;
+}
+
 /* ─── Misc utilities ─────────────────────────────────────────── */
 
 .section-divider {
@@ -1624,6 +1675,12 @@ html, body {
 @keyframes toast-up {
   from { transform: translateX(-50%) translateY(12px); opacity: 0; }
   to { transform: translateX(-50%) translateY(0); opacity: 1; }
+}
+
+@keyframes recording-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.55); }
+  80% { box-shadow: 0 0 0 8px rgba(255, 59, 48, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 59, 48, 0); }
 }
 
 /* ─── Workspace Dropdown ─────────────────────────────────────── */
