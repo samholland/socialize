@@ -3322,7 +3322,6 @@ export default function Home() {
           {/* Ad Editor (only mode now — campaign settings live on project view) */}
             <div className="form-section">
               <div className="ad-brief-card">
-                <div className="ad-brief-label">Brief</div>
                 <p className="ad-brief-text">{adBrief}</p>
               </div>
               <div className="form-group">

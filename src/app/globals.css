@@ -592,10 +592,7 @@ html, body {
 }
 
 .ad-brief-card {
-  padding: 10px 12px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-sm);
-  background: var(--pane-alt);
+
 }
 
 .ad-brief-label {
@@ -608,7 +605,7 @@ html, body {
 }
 
 .ad-brief-text {
-  font-size: 14px;
+  font-size: 18px;
   line-height: 1.45;
   color: var(--ink-2);
 }
@@ -626,20 +623,18 @@ html, body {
 }
 
 .form-label {
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 12.5px;
   color: var(--ink-3);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  letter-spacing: 0px;
 }
 
 .form-input,
 .form-select,
 .form-textarea {
   width: 100%;
-  padding: 8px 11px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-sm);
+  padding: 8px 11px 8px 0px;
+  border: none;
+  border-bottom: 1px solid var(--line-strong);
   font-size: 14px;
   color: var(--ink);
   background: var(--pane);
@@ -657,7 +652,7 @@ html, body {
 .form-select:focus,
 .form-textarea:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: 0 0 0 0px var(--accent-soft);
 }
 
 .form-textarea {
