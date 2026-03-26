@@ -183,6 +183,21 @@ function normalizeHex(v: string | undefined, fb: string): string {
   return /^#[0-9a-fA-F]{6}$/.test(t) ? t.toLowerCase() : fb;
 }
 
+function normalizeHexInput(v: string): string | null {
+  const trimmed = v.trim();
+  if (!trimmed) return null;
+  const raw = trimmed.startsWith("#") ? trimmed.slice(1) : trimmed;
+  if (!/^[0-9a-fA-F]{3}$|^[0-9a-fA-F]{6}$/.test(raw)) return null;
+  const full =
+    raw.length === 3
+      ? raw
+          .split("")
+          .map((char) => `${char}${char}`)
+          .join("")
+      : raw;
+  return `#${full.toLowerCase()}`;
+}
+
 function contrastText(bg: string): string {
   const hex = normalizeHex(bg, DEFAULT_CTA_BG);
   const r = parseInt(hex.slice(1, 3), 16);
@@ -648,7 +663,22 @@ type UiPrefs = {
   igFeedOverlayOffsetY: number;
   mockupBackdropColor: string;
   transparentPngExport: boolean;
+  expandedClients: Record<string, boolean>;
+  expandedProjects: Record<string, boolean>;
 };
+
+function normalizeBooleanRecord(
+  value: unknown
+): Record<string, boolean> {
+  if (!value || typeof value !== "object") return {};
+  return Object.entries(value as Record<string, unknown>).reduce<Record<string, boolean>>(
+    (acc, [key, v]) => {
+      if (typeof v === "boolean") acc[key] = v;
+      return acc;
+    },
+    {}
+  );
+}
 
 function loadUiPrefs(): UiPrefs {
   const fallback: UiPrefs = {
@@ -661,6 +691,8 @@ function loadUiPrefs(): UiPrefs {
     igFeedOverlayOffsetY: 0,
     mockupBackdropColor: DEFAULT_MOCKUP_BACKDROP,
     transparentPngExport: false,
+    expandedClients: {},
+    expandedProjects: {},
   };
   if (typeof window === "undefined") return fallback;
   try {
@@ -676,6 +708,8 @@ function loadUiPrefs(): UiPrefs {
       igFeedOverlayOffsetY?: number;
       mockupBackdropColor?: string;
       transparentPngExport?: boolean;
+      expandedClients?: Record<string, boolean>;
+      expandedProjects?: Record<string, boolean>;
     };
     const opacity =
       typeof parsed.igFeedOverlayOpacity === "number"
@@ -712,6 +746,8 @@ function loadUiPrefs(): UiPrefs {
         typeof parsed.transparentPngExport === "boolean"
           ? parsed.transparentPngExport
           : fallback.transparentPngExport,
+      expandedClients: normalizeBooleanRecord(parsed.expandedClients),
+      expandedProjects: normalizeBooleanRecord(parsed.expandedProjects),
     };
   } catch {
     return fallback;
@@ -992,6 +1028,8 @@ export default function Home() {
     setIgFeedOverlayOffsetY(ui.igFeedOverlayOffsetY);
     setMockupBackdropColor(ui.mockupBackdropColor);
     setTransparentPngExport(ui.transparentPngExport);
+    setExpandedClients(ui.expandedClients);
+    setExpandedProjects(ui.expandedProjects);
   }, []);
 
   // Local-only bootstrap
@@ -1156,6 +1194,7 @@ export default function Home() {
   const [settingsDraft, setSettingsDraft] = useState<
     Record<string, { audienceText: string; pillarsText: string }>
   >({});
+  const [ctaColorDrafts, setCtaColorDrafts] = useState<Record<string, string>>({});
 
   // Media per campaign
   const [campaignMedia, setCampaignMediaMap] = useState<Record<string, PreviewMedia>>({});
@@ -1175,6 +1214,14 @@ export default function Home() {
   const activeWorkspace =
     workspaces.find((w) => w.id === activeWorkspaceId) ?? DEFAULT_WS;
   const activeWorkspaceIsLocal = activeWorkspace.kind === "local";
+
+  function clientExpandKey(clientId: string, workspaceId = activeWorkspaceId): string {
+    return `${workspaceId}::client::${clientId}`;
+  }
+
+  function projectExpandKey(projectId: string, workspaceId = activeWorkspaceId): string {
+    return `${workspaceId}::project::${projectId}`;
+  }
 
   // ── Persistence ────────────────────────────────────────────────
 
@@ -1250,6 +1297,8 @@ export default function Home() {
         igFeedOverlayOffsetY,
         mockupBackdropColor,
         transparentPngExport,
+        expandedClients,
+        expandedProjects,
       })
     );
   }, [
@@ -1263,6 +1312,8 @@ export default function Home() {
     igFeedOverlayOffsetY,
     mockupBackdropColor,
     transparentPngExport,
+    expandedClients,
+    expandedProjects,
   ]);
 
   useEffect(() => {
@@ -1794,7 +1845,7 @@ export default function Home() {
     setData((prev) => ({ clients: [...prev.clients, client] }));
     setSelection({ clientId: id, projectId: project.id, campaignId: project.campaigns[0].id });
     setSelectionLevel("client");
-    setExpandedClients((prev) => ({ ...prev, [id]: true }));
+    setExpandedClients((prev) => ({ ...prev, [clientExpandKey(id)]: true }));
     beginClientEdit(id, "New Client");
   }
 
@@ -1812,7 +1863,7 @@ export default function Home() {
     }));
     setSelection({ clientId, projectId: id, campaignId: campaign.id });
     setSelectionLevel("project");
-    setExpandedProjects((prev) => ({ ...prev, [id]: true }));
+    setExpandedProjects((prev) => ({ ...prev, [projectExpandKey(id)]: true }));
     beginProjectEdit(clientId, id, "New Project");
   }
 
@@ -1851,12 +1902,14 @@ export default function Home() {
       cleanupCampaignMedia(allCampaignIds);
       setExpandedClients((prev) => {
         const next = { ...prev };
-        delete next[clientId];
+        delete next[clientExpandKey(clientId)];
         return next;
       });
       setExpandedProjects((prev) => {
         const next = { ...prev };
-        for (const project of client.projects) delete next[project.id];
+        for (const project of client.projects) {
+          delete next[projectExpandKey(project.id)];
+        }
         return next;
       });
       setData((prev) => ({ clients: prev.clients.filter((c) => c.id !== clientId) }));
@@ -2139,16 +2192,18 @@ export default function Home() {
   }
 
   function toggleClient(clientId: string) {
+    const key = clientExpandKey(clientId);
     setExpandedClients((prev) => ({
       ...prev,
-      [clientId]: !(prev[clientId] ?? true),
+      [key]: !(prev[key] ?? true),
     }));
   }
 
   function toggleProject(projectId: string) {
+    const key = projectExpandKey(projectId);
     setExpandedProjects((prev) => ({
       ...prev,
-      [projectId]: !(prev[projectId] ?? true),
+      [key]: !(prev[key] ?? true),
     }));
   }
 
@@ -2226,8 +2281,8 @@ export default function Home() {
 
     if (!moved) return;
 
-    setExpandedClients((prev) => ({ ...prev, [targetClientId]: true }));
-    setExpandedProjects((prev) => ({ ...prev, [targetProjectId]: true }));
+    setExpandedClients((prev) => ({ ...prev, [clientExpandKey(targetClientId)]: true }));
+    setExpandedProjects((prev) => ({ ...prev, [projectExpandKey(targetProjectId)]: true }));
 
     if (selection.campaignId === campaignId) {
       setSelection({
@@ -2701,7 +2756,7 @@ export default function Home() {
             <div className="tree">
               {data.clients.map((client) => {
                 const isClientSelected = selection.clientId === client.id;
-                const isClientExpanded = expandedClients[client.id] !== false;
+                const isClientExpanded = expandedClients[clientExpandKey(client.id)] !== false;
                 const isEditingClient =
                   editingName?.kind === "client" && editingName.clientId === client.id;
 
@@ -2751,7 +2806,7 @@ export default function Home() {
                         {client.projects.map((project) => {
                           const isProjSelected =
                             isClientSelected && selection.projectId === project.id;
-                          const isProjExpanded = expandedProjects[project.id] !== false;
+                          const isProjExpanded = expandedProjects[projectExpandKey(project.id)] !== false;
                           const isEditingProj =
                             editingName?.kind === "project" &&
                             editingName.projectId === project.id;
@@ -3321,6 +3376,24 @@ export default function Home() {
     const project = selectedProject;
     const isInstagramStory = campaign.platform === "Instagram Story";
     const isFacebookFeed = campaign.platform === "Facebook Feed";
+    const ctaColorDraft = ctaColorDrafts[campaign.id] ?? campaign.ctaBgColor;
+
+    function commitCtaColorDraft() {
+      const normalized = normalizeHexInput(ctaColorDraft);
+      if (!normalized) {
+        setCtaColorDrafts((prev) => ({
+          ...prev,
+          [campaign.id]: campaign.ctaBgColor,
+        }));
+        return;
+      }
+      setCtaColorDrafts((prev) => ({ ...prev, [campaign.id]: normalized }));
+      updateCampaign({
+        ctaBgColor: normalized,
+        ctaTextColor: contrastText(normalized),
+      });
+    }
+
     const adBrief = buildAdBrief({
       audienceProfile: campaign.audienceProfile,
       objective: project.objective,
@@ -3537,6 +3610,10 @@ export default function Home() {
                         value={campaign.ctaBgColor}
                         onChange={(e) => {
                           const v = e.target.value;
+                          setCtaColorDrafts((prev) => ({
+                            ...prev,
+                            [campaign.id]: v,
+                          }));
                           updateCampaign({
                             ctaBgColor: v,
                             ctaTextColor: contrastText(v),
@@ -3546,11 +3623,26 @@ export default function Home() {
                     </label>
                     <input
                       className="form-input"
-                      value={campaign.ctaBgColor}
-                      onChange={(e) => {
-                        const v = normalizeHex(e.target.value, campaign.ctaBgColor);
-                        updateCampaign({ ctaBgColor: v, ctaTextColor: contrastText(v) });
+                      value={ctaColorDraft}
+                      onChange={(e) =>
+                        setCtaColorDrafts((prev) => ({
+                          ...prev,
+                          [campaign.id]: e.target.value,
+                        }))
+                      }
+                      onBlur={commitCtaColorDraft}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          commitCtaColorDraft();
+                        } else if (e.key === "Escape") {
+                          setCtaColorDrafts((prev) => ({
+                            ...prev,
+                            [campaign.id]: campaign.ctaBgColor,
+                          }));
+                        }
                       }}
+                      placeholder="#f2f2f2"
                       style={{ fontFamily: "var(--font-mono, monospace)", fontSize: 13 }}
                     />
                   </div>
