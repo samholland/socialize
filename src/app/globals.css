@@ -175,6 +175,16 @@ html, body {
 .pane-body::-webkit-scrollbar-track { background: transparent; }
 .pane-body::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 2px; }
 
+.sidebar-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+  flex-shrink: 0;
+  background: var(--pane);
+}
+
 /* ─── Resize Handle ──────────────────────────────────────────── */
 
 .resize-handle {
@@ -237,7 +247,6 @@ html, body {
 .tree-row.is-selected .tree-label { color: var(--accent); }
 
 .tree-add-row-project {
-  margin-bottom: 40px;
   margin-top: 0;
 }
 
@@ -254,7 +263,7 @@ html, body {
 
 .tree-row-campaign {
   padding-right: 78px;
-  padding-left: 26px;
+
 }
 
 .tree-row-with-toggle {
@@ -322,7 +331,6 @@ html, body {
 .row-act-btn {
   width: 22px;
   height: 22px;
-  border-radius: var(--r-xs);
   border: none;
   display: flex;
   align-items: center;
@@ -350,10 +358,10 @@ html, body {
 }
 
 .tree-label-client {
-  font-weight: 400;
+  font-weight: 500;
   color: #121212;
   font-size: 20px;
-  letter-spacing: -0.5px;
+  letter-spacing:-0.3px;
 }
 
 .tree-label-project {
@@ -395,8 +403,8 @@ html, body {
 
 /* Tree toggle chevron */
 .tree-toggle {
-  width: 16px;
-  height: 16px;
+  width: 24px;
+  height: 24px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
@@ -466,7 +474,7 @@ html, body {
 }
 .tree-add-row:hover { background: rgba(0, 122, 255, 0.08); color: var(--accent); }
 .tree-add-row-project,
-.tree-add-row-campaign { padding-left: 10px; }
+.tree-add-row-campaign { padding-left: 0px; color: #999999; font-size: 12.5px}
 .tree-add-row-project {
   font-weight: 700;
   padding-top: 8px;
@@ -480,52 +488,14 @@ html, body {
   font-size: 8px;
   font-weight: 700;
   padding: 2px 6px;
-  border-radius: 20px;
+  border-radius: 4px;
+  border: 1px #d3d3d3 solid;
   background: #f3f3f3;
   color: #7a7a80;
   letter-spacing: 0.01em;
   flex-shrink: 0;
   margin-left: 3px;
   text-transform: uppercase;
-}
-
-/* ─── Sidebar search ─────────────────────────────────────────── */
-
-.sidebar-search {
-  padding: 7px 10px;
-  border-bottom: 1px solid var(--line);
-  flex-shrink: 0;
-}
-
-.sidebar-search-wrap {
-  position: relative;
-}
-
-.sidebar-search-icon {
-  position: absolute;
-  left: 8px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--muted);
-  pointer-events: none;
-}
-
-.sidebar-search-input {
-  width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 20px;
-  padding: 5px 10px 5px 26px;
-  font-size: 13px;
-  background: var(--bg);
-  color: var(--ink);
-  outline: none;
-  transition: border-color var(--t), box-shadow var(--t);
-  font-family: var(--font);
-}
-.sidebar-search-input::placeholder { color: var(--placeholder); }
-.sidebar-search-input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 /* ─── Empty State ────────────────────────────────────────────── */

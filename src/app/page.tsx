@@ -124,6 +124,7 @@ const ACTIVE_WS_KEY = "socialize.activeWs";
 const WS_DATA_PREFIX = "socialize.ws.";
 const CLOUD_ACTIVE_WS_KEY = "socialize.cloud.activeWs";
 const CLOUD_IMPORT_DONE_PREFIX = "socialize.cloud.import.done.";
+const LOCAL_WORKSPACE_ID = "ws_local";
 
 const PLATFORM_OPTIONS: Platform[] = [
   "Instagram Feed",
@@ -392,6 +393,31 @@ function defaultSelection(data: AppData): Selection {
   };
 }
 
+function isQuotaExceededStorageError(error: unknown): boolean {
+  if (!(error instanceof DOMException)) return false;
+  return (
+    error.name === "QuotaExceededError" ||
+    error.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
+    error.code === 22 ||
+    error.code === 1014
+  );
+}
+
+function safeSetLocalStorage(key: string, value: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (error) {
+    if (isQuotaExceededStorageError(error)) {
+      console.warn(`Local storage quota exceeded while writing "${key}".`);
+      return false;
+    }
+    console.warn(`Unable to write "${key}" to local storage.`, error);
+    return false;
+  }
+}
+
 function loadWorkspaceList(): Workspace[] {
   if (typeof window === "undefined") return [];
   try {
@@ -407,14 +433,14 @@ function loadWorkspaceList(): Workspace[] {
       const parsed = JSON.parse(legacy) as { data?: AppData; selection?: Selection; level?: SelectionLevel };
       if (parsed?.data?.clients) {
         // Migrate data to new key
-        localStorage.setItem(WS_DATA_PREFIX + defaultWs.id, legacy);
-        localStorage.setItem(WORKSPACES_KEY, JSON.stringify([defaultWs]));
-        localStorage.setItem(ACTIVE_WS_KEY, defaultWs.id);
+        safeSetLocalStorage(WS_DATA_PREFIX + defaultWs.id, legacy);
+        safeSetLocalStorage(WORKSPACES_KEY, JSON.stringify([defaultWs]));
+        safeSetLocalStorage(ACTIVE_WS_KEY, defaultWs.id);
         return [defaultWs];
       }
     }
     const defaultWs: Workspace = { id: "ws_default", name: "My Workspace", kind: "local" };
-    localStorage.setItem(WORKSPACES_KEY, JSON.stringify([defaultWs]));
+    safeSetLocalStorage(WORKSPACES_KEY, JSON.stringify([defaultWs]));
     return [defaultWs];
   } catch {
     return [{ id: "ws_default", name: "My Workspace", kind: "local" }];
@@ -459,9 +485,71 @@ function loadWorkspaceData(wsId: string): { data: AppData; selection: Selection;
   }
 }
 
+function loadPrimaryLocalWorkspaceState(): {
+  data: AppData;
+  selection: Selection;
+  level: SelectionLevel;
+} {
+  if (typeof window === "undefined") {
+    const data = emptyWorkspace();
+    return { data, selection: defaultSelection(data), level: "campaign" };
+  }
+
+  const localRaw = localStorage.getItem(WS_DATA_PREFIX + LOCAL_WORKSPACE_ID);
+  const local = loadWorkspaceData(LOCAL_WORKSPACE_ID);
+  if (localRaw || local.data.clients.length > 0) {
+    return local;
+  }
+
+  const oldDefault = loadWorkspaceData("ws_default");
+  if (oldDefault.data.clients.length > 0) {
+    const serialized = JSON.stringify(oldDefault);
+    const localKey = WS_DATA_PREFIX + LOCAL_WORKSPACE_ID;
+    const oldKey = WS_DATA_PREFIX + "ws_default";
+    let wrote = safeSetLocalStorage(localKey, serialized);
+    // If quota is tight, move instead of copy by freeing the old key first.
+    if (!wrote) {
+      localStorage.removeItem(oldKey);
+      wrote = safeSetLocalStorage(localKey, serialized);
+    } else {
+      localStorage.removeItem(oldKey);
+    }
+    if (!wrote) {
+      // Keep using old payload in-memory this session even if persistence is full.
+      return oldDefault;
+    }
+    return oldDefault;
+  }
+
+  const wsList = loadWorkspaceList();
+  const oldActive = loadActiveWsId(wsList);
+  const migrated = loadWorkspaceData(oldActive);
+  if (migrated.data.clients.length > 0) {
+    const serialized = JSON.stringify(migrated);
+    const localKey = WS_DATA_PREFIX + LOCAL_WORKSPACE_ID;
+    const oldKey = WS_DATA_PREFIX + oldActive;
+    let wrote = safeSetLocalStorage(localKey, serialized);
+    if (!wrote && oldKey !== localKey) {
+      localStorage.removeItem(oldKey);
+      wrote = safeSetLocalStorage(localKey, serialized);
+    } else if (wrote && oldKey !== localKey) {
+      localStorage.removeItem(oldKey);
+    }
+    if (!wrote) return migrated;
+    return migrated;
+  }
+
+  return local;
+}
+
 function getLegacyWorkspaceForImport(): AppData | null {
   if (typeof window === "undefined") return null;
   try {
+    const localRaw = localStorage.getItem(WS_DATA_PREFIX + LOCAL_WORKSPACE_ID);
+    if (localRaw) {
+      const parsed = JSON.parse(localRaw) as { data?: AppData };
+      if (parsed?.data?.clients?.length) return normalizeData(parsed.data);
+    }
     const legacyRaw = localStorage.getItem(LEGACY_STORAGE_KEY);
     if (legacyRaw) {
       const parsed = JSON.parse(legacyRaw) as { data?: AppData };
@@ -675,14 +763,6 @@ function IconChevron({ open }: { open: boolean }) {
   );
 }
 
-function IconChevronDown() {
-  return (
-    <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
-      <path d="M2 3l3 4 3-4H2z" />
-    </svg>
-  );
-}
-
 function IconWorkspace() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -728,15 +808,6 @@ function IconPlus() {
     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
       <line x1="12" y1="5" x2="12" y2="19" />
       <line x1="5" y1="12" x2="19" y2="12" />
-    </svg>
-  );
-}
-
-function IconSearch() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="11" cy="11" r="8" />
-      <line x1="21" y1="21" x2="16.65" y2="16.65" />
     </svg>
   );
 }
@@ -819,7 +890,11 @@ function ResizeHandle({ onDrag }: { onDrag: (dx: number) => void }) {
 
 // ─── Main Component ───────────────────────────────────────────────
 
-const DEFAULT_WS: Workspace = { id: "ws_default", name: "My Workspace", kind: "local" };
+const DEFAULT_WS: Workspace = {
+  id: LOCAL_WORKSPACE_ID,
+  name: "Local Workspace",
+  kind: "local",
+};
 const DEFAULT_EMPTY_DATA = emptyWorkspace();
 const DEFAULT_SELECTION: Selection = { clientId: "", projectId: "", campaignId: "" };
 
@@ -836,7 +911,6 @@ export default function Home() {
   // Workspace — start with static defaults to match SSR, then load from localStorage after mount
   const [workspaces, setWorkspaces] = useState<Workspace[]>([DEFAULT_WS]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>(DEFAULT_WS.id);
-  const [wsDropdownOpen, setWsDropdownOpen] = useState(false);
 
   const [data, setData] = useState<AppData>(DEFAULT_EMPTY_DATA);
   const [selection, setSelection] = useState<Selection>(DEFAULT_SELECTION);
@@ -864,11 +938,10 @@ export default function Home() {
   // Local-only bootstrap
   useEffect(() => {
     if (cloudEnabled) return;
-    const wsList = loadWorkspaceList();
-    const wsId = loadActiveWsId(wsList);
-    const wsData = loadWorkspaceData(wsId);
-    setWorkspaces(wsList);
-    setActiveWorkspaceId(wsId);
+    const wsData = loadPrimaryLocalWorkspaceState();
+    setWorkspaces([DEFAULT_WS]);
+    setActiveWorkspaceId(DEFAULT_WS.id);
+    hydratedWorkspaceRef.current = DEFAULT_WS.id;
     setData(wsData.data);
     setSelection(wsData.selection);
     setSelectionLevel(wsData.level);
@@ -921,12 +994,19 @@ export default function Home() {
     let cancelled = false;
     void (async () => {
       try {
+        const localState = loadPrimaryLocalWorkspaceState();
         const personal = await ensureProfileAndPersonalWorkspace(supabase, authUser);
         const wsList = await listAccessibleWorkspaces(supabase, authUser.id);
-        const resolvedList =
+        const cloudWorkspaces =
           wsList.length > 0
             ? wsList
             : [personal];
+        const resolvedList: Workspace[] = [
+          DEFAULT_WS,
+          ...cloudWorkspaces
+            .filter((w) => w.id !== DEFAULT_WS.id)
+            .map((w) => ({ id: w.id, name: w.name, kind: w.kind })),
+        ];
 
         const storedActive =
           typeof window !== "undefined"
@@ -934,30 +1014,36 @@ export default function Home() {
             : null;
         const wsId =
           (storedActive && resolvedList.find((w) => w.id === storedActive)?.id) ||
-          resolvedList[0]?.id ||
+          DEFAULT_WS.id ||
           personal.id;
 
-        const cloudData = (await loadCloudWorkspaceData(
-          supabase,
-          wsId
-        )) as CloudAppData;
-        const normalized = normalizeData(cloudData as AppData);
-        const sel = defaultSelection(normalized);
-
         if (cancelled) return;
-        setWorkspaces(
-          resolvedList.map((w) => ({ id: w.id, name: w.name, kind: w.kind }))
-        );
+        setWorkspaces(resolvedList);
         setActiveWorkspaceId(wsId);
         hydratedWorkspaceRef.current = wsId;
-        setData(normalized);
-        setSelection(sel);
-        setSelectionLevel("campaign");
-        setStorageReady(true);
-        setCloudHydrated(true);
-        void hydrateSignedMediaForWorkspace(wsId, normalized).catch((error) => {
-          console.error("Failed to hydrate signed media", error);
-        });
+        if (wsId === DEFAULT_WS.id) {
+          setData(localState.data);
+          setSelection(localState.selection);
+          setSelectionLevel(localState.level);
+          setStorageReady(true);
+          setCloudHydrated(true);
+        } else {
+          const cloudData = (await loadCloudWorkspaceData(
+            supabase,
+            wsId
+          )) as CloudAppData;
+          const normalized = normalizeData(cloudData as AppData);
+          const sel = defaultSelection(normalized);
+          if (cancelled) return;
+          setData(normalized);
+          setSelection(sel);
+          setSelectionLevel("campaign");
+          setStorageReady(true);
+          setCloudHydrated(true);
+          void hydrateSignedMediaForWorkspace(wsId, normalized).catch((error) => {
+            console.error("Failed to hydrate signed media", error);
+          });
+        }
 
         if (typeof window !== "undefined") {
           const importKey = CLOUD_IMPORT_DONE_PREFIX + authUser.id;
@@ -993,9 +1079,6 @@ export default function Home() {
   const [igFeedOverlayOffsetX, setIgFeedOverlayOffsetX] = useState(0);
   const [igFeedOverlayOffsetY, setIgFeedOverlayOffsetY] = useState(0);
 
-  // Sidebar search
-  const [sidebarSearch, setSidebarSearch] = useState("");
-
   // Inline renaming
   const [editingName, setEditingName] = useState<EditingName | null>(null);
 
@@ -1023,6 +1106,9 @@ export default function Home() {
   const previewExportRef = useRef<HTMLDivElement>(null);
   const saveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydratedWorkspaceRef = useRef<string>("");
+  const activeWorkspace =
+    workspaces.find((w) => w.id === activeWorkspaceId) ?? DEFAULT_WS;
+  const activeWorkspaceIsLocal = activeWorkspace.kind === "local";
 
   // ── Persistence ────────────────────────────────────────────────
 
@@ -1030,12 +1116,12 @@ export default function Home() {
   useEffect(() => {
     if (!storageReady) return;
     if (cloudEnabled) return;
-    localStorage.setItem(WORKSPACES_KEY, JSON.stringify(workspaces));
+    safeSetLocalStorage(WORKSPACES_KEY, JSON.stringify(workspaces));
   }, [cloudEnabled, storageReady, workspaces]);
 
   useEffect(() => {
     if (!storageReady) return;
-    localStorage.setItem(
+    safeSetLocalStorage(
       cloudEnabled ? CLOUD_ACTIVE_WS_KEY : ACTIVE_WS_KEY,
       activeWorkspaceId
     );
@@ -1044,8 +1130,8 @@ export default function Home() {
   // Persist current workspace data
   useEffect(() => {
     if (!storageReady) return;
-    if (!cloudEnabled) {
-      localStorage.setItem(
+    if (!cloudEnabled || activeWorkspaceIsLocal) {
+      safeSetLocalStorage(
         WS_DATA_PREFIX + activeWorkspaceId,
         JSON.stringify({ data, selection, level: selectionLevel })
       );
@@ -1068,6 +1154,7 @@ export default function Home() {
   }, [
     storageReady,
     cloudEnabled,
+    activeWorkspaceIsLocal,
     supabase,
     authUser,
     cloudHydrated,
@@ -1085,7 +1172,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!storageReady) return;
-    localStorage.setItem(
+    safeSetLocalStorage(
       UI_KEY,
       JSON.stringify({
         panelWidths,
@@ -1418,10 +1505,22 @@ export default function Home() {
   // ── Workspace management ───────────────────────────────────────
 
   function switchWorkspace(wsId: string) {
-    if (wsId === activeWorkspaceId) { setWsDropdownOpen(false); return; }
+    if (wsId === activeWorkspaceId) return;
+    const target = workspaces.find((w) => w.id === wsId);
+    if (!target) return;
+
+    if (target.kind === "local") {
+      const local = loadPrimaryLocalWorkspaceState();
+      hydratedWorkspaceRef.current = wsId;
+      setActiveWorkspaceId(wsId);
+      setData(local.data);
+      setSelection(local.selection);
+      setSelectionLevel(local.level);
+      return;
+    }
+
     if (cloudEnabled) {
       if (!supabase || !authUser) return;
-      setWsDropdownOpen(false);
       setStorageReady(false);
       void (async () => {
         try {
@@ -1446,7 +1545,7 @@ export default function Home() {
       return;
     }
     // Save current workspace data before switching
-    localStorage.setItem(
+    safeSetLocalStorage(
       WS_DATA_PREFIX + activeWorkspaceId,
       JSON.stringify({ data, selection, level: selectionLevel })
     );
@@ -1455,15 +1554,13 @@ export default function Home() {
     setSelection(newSel);
     setSelectionLevel(newLevel);
     setActiveWorkspaceId(wsId);
-    setWsDropdownOpen(false);
   }
 
   function createWorkspace() {
-    if (cloudEnabled) {
-      if (!supabase || !authUser) return;
-      const name = `Workspace ${workspaces.length + 1}`;
+    if (cloudEnabled && supabase && authUser) {
+      const existingShared = workspaces.filter((w) => w.kind !== "local").length;
+      const name = `Cloud Workspace ${existingShared + 1}`;
       const ws: Workspace = { id: newId("ws"), name, kind: "personal" };
-      setWsDropdownOpen(false);
       void (async () => {
         const { error } = await supabase.from("workspaces").insert({
           id: ws.id,
@@ -1486,25 +1583,11 @@ export default function Home() {
       })();
       return;
     }
-    const name = `Workspace ${workspaces.length + 1}`;
-    const ws: Workspace = { id: newId("ws"), name, kind: "local" };
-    // Save current workspace before switching
-    localStorage.setItem(
-      WS_DATA_PREFIX + activeWorkspaceId,
-      JSON.stringify({ data, selection, level: selectionLevel })
-    );
-    const empty = emptyWorkspace();
-    setWorkspaces((prev) => [...prev, ws]);
-    setActiveWorkspaceId(ws.id);
-    setData(empty);
-    setSelection(defaultSelection(empty));
-    setSelectionLevel("campaign");
-    setWsDropdownOpen(false);
   }
 
   function markImportDone(userId: string) {
     if (typeof window === "undefined") return;
-    localStorage.setItem(CLOUD_IMPORT_DONE_PREFIX + userId, "1");
+    safeSetLocalStorage(CLOUD_IMPORT_DONE_PREFIX + userId, "1");
   }
 
   async function importLegacyWorkspaceNow() {
@@ -1516,20 +1599,42 @@ export default function Home() {
       return;
     }
 
-    const merged = mergeImportedData(data, legacy);
     setImportPending(true);
     try {
-      setData(merged);
-      if (!selection.clientId) {
-        setSelection(defaultSelection(merged));
-        setSelectionLevel("campaign");
+      const targetWorkspace =
+        activeWorkspaceIsLocal
+          ? workspaces.find((w) => w.kind !== "local")
+          : activeWorkspace;
+      if (!targetWorkspace) {
+        alert("No cloud workspace is available for import.");
+        return;
       }
+
+      let baseData = data;
+      if (targetWorkspace.id !== activeWorkspaceId) {
+        const cloudData = (await loadCloudWorkspaceData(
+          supabase,
+          targetWorkspace.id
+        )) as CloudAppData;
+        baseData = normalizeData(cloudData as AppData);
+      }
+
+      const merged = mergeImportedData(baseData, legacy);
       await saveWorkspaceData(
         supabase,
-        activeWorkspaceId,
+        targetWorkspace.id,
         merged as CloudAppData,
         authUser.id
       );
+      if (targetWorkspace.id === activeWorkspaceId) {
+        setData(merged);
+        if (!selection.clientId) {
+          setSelection(defaultSelection(merged));
+          setSelectionLevel("campaign");
+        }
+      } else {
+        switchWorkspace(targetWorkspace.id);
+      }
       markImportDone(authUser.id);
       setShowImportPrompt(false);
     } catch (error) {
@@ -1550,7 +1655,6 @@ export default function Home() {
     if (!supabase) return;
     await supabase.auth.signOut();
     setCampaignMediaMap({});
-    setWsDropdownOpen(false);
   }
 
   // ── Soft delete with undo ──────────────────────────────────────
@@ -1664,6 +1768,49 @@ export default function Home() {
 
   // ── Delete ─────────────────────────────────────────────────────
 
+  function deleteClient(clientId: string) {
+    const client = data.clients.find((c) => c.id === clientId);
+    if (!client) return;
+    const allCampaignIds = client.projects.flatMap((p) =>
+      p.campaigns.map((c) => c.id)
+    );
+    const snapshot = { ...data };
+    const selSnap = { ...selection };
+    const levelSnap = selectionLevel;
+    softDelete(`"${client.name}"`, () => {
+      cleanupCampaignMedia(allCampaignIds);
+      setExpandedClients((prev) => {
+        const next = { ...prev };
+        delete next[clientId];
+        return next;
+      });
+      setExpandedProjects((prev) => {
+        const next = { ...prev };
+        for (const project of client.projects) delete next[project.id];
+        return next;
+      });
+      setData((prev) => ({ clients: prev.clients.filter((c) => c.id !== clientId) }));
+      if (selection.clientId === clientId) {
+        const remaining = data.clients.filter((c) => c.id !== clientId);
+        const next = remaining[0];
+        setSelection(
+          next
+            ? {
+                clientId: next.id,
+                projectId: next.projects[0]?.id ?? "",
+                campaignId: next.projects[0]?.campaigns[0]?.id ?? "",
+              }
+            : { clientId: "", projectId: "", campaignId: "" }
+        );
+        setSelectionLevel(next ? "client" : "campaign");
+      }
+    }, () => {
+      setData(snapshot);
+      setSelection(selSnap);
+      setSelectionLevel(levelSnap);
+    });
+  }
+
   function deleteProject(clientId: string, projectId: string) {
     const client = data.clients.find((c) => c.id === clientId);
     const project = client?.projects.find((p) => p.id === projectId);
@@ -1697,6 +1844,22 @@ export default function Home() {
       setSelection(selSnap);
       setSelectionLevel(levelSnap);
     });
+  }
+
+  function requestDeleteClient(client: Client) {
+    const confirmed = window.confirm(
+      `Delete client "${client.name}" and all its projects and ads?`
+    );
+    if (!confirmed) return;
+    deleteClient(client.id);
+  }
+
+  function requestDeleteProject(clientId: string, project: Project) {
+    const confirmed = window.confirm(
+      `Delete project "${project.name}" and all its ads?`
+    );
+    if (!confirmed) return;
+    deleteProject(clientId, project.id);
   }
 
   function deleteCampaign(clientId: string, projectId: string, campaignId: string) {
@@ -2245,32 +2408,6 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection, selectionLevel]);
 
-  // ── Search filter ──────────────────────────────────────────────
-
-  const filteredData = useMemo((): AppData => {
-    if (!sidebarSearch.trim()) return data;
-    const q = sidebarSearch.toLowerCase();
-    return {
-      clients: data.clients
-        .map((client) => {
-          const clientMatch = client.name.toLowerCase().includes(q);
-          const projects = client.projects
-            .map((project) => {
-              const projMatch = project.name.toLowerCase().includes(q);
-              const campaigns = project.campaigns.filter(
-                (c) => projMatch || clientMatch || c.name.toLowerCase().includes(q)
-              );
-              if (!clientMatch && !projMatch && campaigns.length === 0) return null;
-              return { ...project, campaigns };
-            })
-            .filter(Boolean) as Project[];
-          if (!clientMatch && projects.length === 0) return null;
-          return { ...client, projects };
-        })
-        .filter(Boolean) as Client[],
-    };
-  }, [data, sidebarSearch]);
-
   // ─────────────────────────────────────────────────────────────────────
   // RENDER SECTIONS
   // ─────────────────────────────────────────────────────────────────────
@@ -2279,67 +2416,81 @@ export default function Home() {
 
   function renderSidebar() {
     const hasClients = data.clients.length > 0;
-    const activeWs = workspaces.find((w) => w.id === activeWorkspaceId) ?? workspaces[0];
+    const localWorkspace =
+      workspaces.find((w) => w.kind === "local") ?? DEFAULT_WS;
+    const sharedWorkspaces = workspaces.filter((w) => w.kind !== "local");
 
     return (
       <>
         <div className="pane-header">
-          {/* Workspace dropdown */}
-          <div className="ws-dropdown-wrap">
-            <button
-              className="ws-dropdown-btn"
-              onClick={() => setWsDropdownOpen((o) => !o)}
-            >
-              <IconWorkspace />
-              <span className="ws-dropdown-name">{activeWs?.name ?? "Workspace"}</span>
-              <IconChevronDown />
-            </button>
-            {wsDropdownOpen && (
-              <div className="ws-dropdown-menu">
-                {workspaces.map((ws) => (
-                  <button
-                    key={ws.id}
-                    className={`ws-dropdown-item${ws.id === activeWorkspaceId ? " is-active" : ""}`}
-                    onClick={() => switchWorkspace(ws.id)}
-                  >
-                    <IconWorkspace />
-                    <span>{ws.name}</span>
-                    {ws.id === activeWorkspaceId && <span className="ws-check">✓</span>}
-                  </button>
-                ))}
-                <div className="ws-dropdown-divider" />
-                <button className="ws-dropdown-item ws-dropdown-new" onClick={createWorkspace}>
-                  <IconPlus />
-                  <span>{cloudEnabled ? "New Personal Workspace" : "New Workspace"}</span>
-                </button>
-              </div>
-            )}
-          </div>
-          <div style={{ flex: 1 }} />
-          <button
-            className="btn btn-primary btn-sm"
-            onClick={addClient}
-            title="Add client"
-          >
-            <IconPlus /> Client
-          </button>
+          <span className="pane-header-title">Workspaces</span>
         </div>
 
-        {hasClients && (
-          <div className="sidebar-search">
-            <div className="sidebar-search-wrap">
-              <span className="sidebar-search-icon">
-                <IconSearch />
-              </span>
-              <input
-                className="sidebar-search-input"
-                placeholder="Search…"
-                value={sidebarSearch}
-                onChange={(e) => setSidebarSearch(e.target.value)}
-              />
-            </div>
+        <div style={{ padding: "8px 12px 10px", borderBottom: "1px solid var(--line)" }}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              color: "var(--ink-3)",
+              marginBottom: 6,
+            }}
+          >
+            Local
           </div>
-        )}
+          <button
+            className={`ws-dropdown-item${localWorkspace.id === activeWorkspaceId ? " is-active" : ""}`}
+            style={{ width: "100%" }}
+            onClick={() => switchWorkspace(localWorkspace.id)}
+          >
+            <IconWorkspace />
+            <span>{localWorkspace.name}</span>
+            {localWorkspace.id === activeWorkspaceId && <span className="ws-check">✓</span>}
+          </button>
+
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              color: "var(--ink-3)",
+              marginTop: 10,
+              marginBottom: 6,
+            }}
+          >
+            Shared
+          </div>
+          {sharedWorkspaces.length === 0 ? (
+            <div style={{ fontSize: 12, color: "var(--ink-3)", padding: "4px 2px" }}>
+              {cloudEnabled ? "No shared workspaces yet" : "Enable Supabase to use shared workspaces"}
+            </div>
+          ) : (
+            sharedWorkspaces.map((ws) => (
+              <button
+                key={ws.id}
+                className={`ws-dropdown-item${ws.id === activeWorkspaceId ? " is-active" : ""}`}
+                style={{ width: "100%" }}
+                onClick={() => switchWorkspace(ws.id)}
+              >
+                <IconWorkspace />
+                <span>{ws.name}</span>
+                {ws.id === activeWorkspaceId && <span className="ws-check">✓</span>}
+              </button>
+            ))
+          )}
+          {cloudEnabled && authUser && (
+            <button
+              className="ws-dropdown-item ws-dropdown-new"
+              style={{ width: "100%", marginTop: 6 }}
+              onClick={createWorkspace}
+            >
+              <IconPlus />
+              <span>New Cloud Workspace</span>
+            </button>
+          )}
+        </div>
 
         <div className="pane-body">
           {!hasClients ? (
@@ -2349,13 +2500,10 @@ export default function Home() {
               </div>
               <h3>No clients yet</h3>
               <p>Add your first client to get started</p>
-              <button className="btn btn-primary" onClick={addClient}>
-                <IconPlus /> Add Client
-              </button>
             </div>
           ) : (
             <div className="tree">
-              {filteredData.clients.map((client) => {
+              {data.clients.map((client) => {
                 const isClientSelected = selection.clientId === client.id;
                 const isClientExpanded = expandedClients[client.id] !== false;
                 const isEditingClient =
@@ -2373,21 +2521,6 @@ export default function Home() {
                       }}
                       onDoubleClick={() => beginClientEdit(client.id, client.name)}
                     >
-                      {client.profileImageDataUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={client.profileImageDataUrl}
-                          alt=""
-                          className="tree-avatar"
-                        />
-                      ) : (
-                        <div className="tree-avatar">
-                          <span style={{ fontSize: 9 }}>
-                            {client.name.slice(0, 1).toUpperCase()}
-                          </span>
-                        </div>
-                      )}
-
                       {isEditingClient ? (
                         <input
                           autoFocus
@@ -2575,6 +2708,16 @@ export default function Home() {
             </div>
           )}
         </div>
+
+        <div className="sidebar-footer">
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={addClient}
+            title="Add client"
+          >
+            <IconPlus /> Add Client
+          </button>
+        </div>
       </>
     );
   }
@@ -2647,6 +2790,14 @@ export default function Home() {
               />
               Verified account
             </label>
+            <div style={{ marginTop: 12 }}>
+              <button
+                className="btn btn-danger btn-sm"
+                onClick={() => requestDeleteClient(client)}
+              >
+                Delete Client
+              </button>
+            </div>
           </div>
         </div>
 
@@ -2734,6 +2885,14 @@ export default function Home() {
           {project.primaryGoal && (
             <div className="context-header-meta">{project.primaryGoal}</div>
           )}
+          <div style={{ marginTop: 10 }}>
+            <button
+              className="btn btn-danger btn-sm"
+              onClick={() => requestDeleteProject(client.id, project)}
+            >
+              Delete Project
+            </button>
+          </div>
         </div>
 
         <div className="pane-body">
