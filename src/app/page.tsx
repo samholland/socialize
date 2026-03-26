@@ -230,6 +230,45 @@ function normalizeStringList(v: unknown): string[] {
     .filter(Boolean);
 }
 
+function cleanSentenceFragment(v: string | undefined): string {
+  if (!v) return "";
+  return v
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/[.?!]+$/g, "");
+}
+
+function objectiveAction(
+  objective: CampaignObjective,
+  cta: string
+): string {
+  if (objective === "Awareness") return "stop scrolling and watch";
+  const normalizedCta = cleanSentenceFragment(cta).toLowerCase();
+  return normalizedCta || "learn more";
+}
+
+function buildAdBrief(args: {
+  audienceProfile: string;
+  objective: CampaignObjective;
+  primaryGoal: string;
+  cta: string;
+}): string {
+  const audience = cleanSentenceFragment(args.audienceProfile).toLowerCase();
+  const primaryGoal = cleanSentenceFragment(args.primaryGoal);
+  const action = objectiveAction(args.objective, args.cta);
+
+  if (primaryGoal && audience) {
+    return `Write an ad that will ${primaryGoal}, and will make ${audience} want to ${action}.`;
+  }
+  if (primaryGoal) {
+    return `Write an ad that will ${primaryGoal}, and will make someone want to ${action}.`;
+  }
+  if (audience) {
+    return `Write an ad that makes ${audience} want to ${action}.`;
+  }
+  return `Write an ad that would make someone want to ${action}.`;
+}
+
 function linesToList(v: string): string[] {
   return v
     .split(/\r?\n/g)
@@ -3267,14 +3306,25 @@ export default function Home() {
     }
 
     const campaign = selectedCampaign;
+    const project = selectedProject;
     const isInstagramStory = campaign.platform === "Instagram Story";
     const isFacebookFeed = campaign.platform === "Facebook Feed";
+    const adBrief = buildAdBrief({
+      audienceProfile: campaign.audienceProfile,
+      objective: project.objective,
+      primaryGoal: project.primaryGoal,
+      cta: campaign.cta,
+    });
 
     return (
       <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
         <div className="pane-body">
           {/* Ad Editor (only mode now — campaign settings live on project view) */}
             <div className="form-section">
+              <div className="ad-brief-card">
+                <div className="ad-brief-label">Ad Brief</div>
+                <p className="ad-brief-text">{adBrief}</p>
+              </div>
               <div className="form-group">
                 <label className="form-label">Ad Name</label>
                 <input

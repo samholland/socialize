@@ -365,6 +365,13 @@ html, body {
   line-height: 1.25;
 }
 
+.tree-no-toggle {
+  flex: 0 1 auto;
+  display: inline-block;
+  width: auto;
+  max-width: 100%;
+}
+
 .tree-label-client {
   font-weight: 500;
   color: #121212;
@@ -582,6 +589,28 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 18px;
+}
+
+.ad-brief-card {
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--pane-alt);
+}
+
+.ad-brief-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-3);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.ad-brief-text {
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--ink-2);
 }
 
 .form-group {
