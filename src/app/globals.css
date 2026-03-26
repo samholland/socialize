@@ -365,13 +365,15 @@ html, body {
 }
 
 .tree-label-project {
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
   color: #121212;
 }
 
 .tree-label-campaign {
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 400;
   color: #121212;
 }
