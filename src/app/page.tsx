@@ -115,6 +115,12 @@ type PendingUndo = {
   timerId: ReturnType<typeof setTimeout>;
 };
 
+type CampaignDragPayload = {
+  campaignId: string;
+  sourceClientId: string;
+  sourceProjectId: string;
+};
+
 // ─── Constants ───────────────────────────────────────────────────
 
 const LEGACY_STORAGE_KEY = "socialize.v1.workspace"; // for migration only
@@ -1085,6 +1091,10 @@ export default function Home() {
   // Tree expand/collapse
   const [expandedClients, setExpandedClients] = useState<Record<string, boolean>>({});
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
+  const [draggingCampaignId, setDraggingCampaignId] = useState<string | null>(null);
+  const [draggingCampaignPayload, setDraggingCampaignPayload] =
+    useState<CampaignDragPayload | null>(null);
+  const [campaignDropProjectId, setCampaignDropProjectId] = useState<string | null>(null);
 
   // Campaign settings drafts
   const [settingsDraft, setSettingsDraft] = useState<
@@ -2082,6 +2092,141 @@ export default function Home() {
     }));
   }
 
+  function readCampaignDragPayload(e: React.DragEvent): CampaignDragPayload | null {
+    const raw =
+      e.dataTransfer.getData("application/x-socialize-campaign") ||
+      e.dataTransfer.getData("text/plain");
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as CampaignDragPayload;
+      if (
+        typeof parsed?.campaignId !== "string" ||
+        typeof parsed?.sourceClientId !== "string" ||
+        typeof parsed?.sourceProjectId !== "string"
+      ) {
+        return null;
+      }
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  function moveCampaignBetweenProjects(
+    sourceClientId: string,
+    sourceProjectId: string,
+    campaignId: string,
+    targetClientId: string,
+    targetProjectId: string
+  ) {
+    if (
+      sourceClientId === targetClientId &&
+      sourceProjectId === targetProjectId
+    ) {
+      return;
+    }
+
+    let moved = false;
+    setData((prev) => {
+      let movingCampaign: Campaign | null = null;
+
+      const removed = prev.clients.map((client) => {
+        if (client.id !== sourceClientId) return client;
+        return {
+          ...client,
+          projects: client.projects.map((project) => {
+            if (project.id !== sourceProjectId) return project;
+            const found = project.campaigns.find((c) => c.id === campaignId) ?? null;
+            if (found) movingCampaign = found;
+            return {
+              ...project,
+              campaigns: project.campaigns.filter((c) => c.id !== campaignId),
+            };
+          }),
+        };
+      });
+
+      if (!movingCampaign) return prev;
+
+      const inserted = removed.map((client) => {
+        if (client.id !== targetClientId) return client;
+        return {
+          ...client,
+          projects: client.projects.map((project) =>
+            project.id !== targetProjectId
+              ? project
+              : { ...project, campaigns: [...project.campaigns, movingCampaign as Campaign] }
+          ),
+        };
+      });
+
+      moved = true;
+      return { clients: inserted };
+    });
+
+    if (!moved) return;
+
+    setExpandedClients((prev) => ({ ...prev, [targetClientId]: true }));
+    setExpandedProjects((prev) => ({ ...prev, [targetProjectId]: true }));
+
+    if (selection.campaignId === campaignId) {
+      setSelection({
+        clientId: targetClientId,
+        projectId: targetProjectId,
+        campaignId,
+      });
+      setSelectionLevel("campaign");
+    }
+  }
+
+  function onCampaignDragStart(
+    e: React.DragEvent<HTMLDivElement>,
+    payload: CampaignDragPayload
+  ) {
+    e.stopPropagation();
+    const serialized = JSON.stringify(payload);
+    e.dataTransfer.setData("application/x-socialize-campaign", serialized);
+    e.dataTransfer.setData("text/plain", serialized);
+    e.dataTransfer.effectAllowed = "move";
+    setDraggingCampaignId(payload.campaignId);
+    setDraggingCampaignPayload(payload);
+  }
+
+  function onCampaignDragEnd() {
+    setDraggingCampaignId(null);
+    setDraggingCampaignPayload(null);
+    setCampaignDropProjectId(null);
+  }
+
+  function onProjectCampaignDragOver(
+    e: React.DragEvent<HTMLDivElement>,
+    targetProjectId: string
+  ) {
+    const payload = draggingCampaignPayload ?? readCampaignDragPayload(e);
+    if (!payload || payload.sourceProjectId === targetProjectId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setCampaignDropProjectId(targetProjectId);
+  }
+
+  function onProjectCampaignDrop(
+    e: React.DragEvent<HTMLDivElement>,
+    targetClientId: string,
+    targetProjectId: string
+  ) {
+    const payload = draggingCampaignPayload ?? readCampaignDragPayload(e);
+    setCampaignDropProjectId(null);
+    if (!payload) return;
+    e.preventDefault();
+    moveCampaignBetweenProjects(
+      payload.sourceClientId,
+      payload.sourceProjectId,
+      payload.campaignId,
+      targetClientId,
+      targetProjectId
+    );
+  }
+
   // ── Export ─────────────────────────────────────────────────────
 
   function exportCsv(filename: string, csv: string) {
@@ -2564,7 +2709,7 @@ export default function Home() {
                             <div key={project.id}>
                               {/* Project row */}
                               <div
-                                className={`tree-row tree-row-project tree-row-with-toggle${isProjSelected && selectionLevel === "project" ? " is-selected" : ""}`}
+                                className={`tree-row tree-row-project tree-row-with-toggle${isProjSelected && selectionLevel === "project" ? " is-selected" : ""}${campaignDropProjectId === project.id ? " is-drop-target" : ""}`}
                                 onClick={(e) => {
                                   selectProject(client.id, project.id);
                                   if ((e.target as HTMLElement).closest(".tree-no-toggle")) return;
@@ -2573,6 +2718,14 @@ export default function Home() {
                                 onDoubleClick={() =>
                                   beginProjectEdit(client.id, project.id, project.name)
                                 }
+                                onDragOver={(e) => onProjectCampaignDragOver(e, project.id)}
+                                onDragEnter={(e) => onProjectCampaignDragOver(e, project.id)}
+                                onDragLeave={() => {
+                                  if (campaignDropProjectId === project.id) {
+                                    setCampaignDropProjectId(null);
+                                  }
+                                }}
+                                onDrop={(e) => onProjectCampaignDrop(e, client.id, project.id)}
                               >
                                 {isEditingProj ? (
                                   <input
@@ -2617,7 +2770,7 @@ export default function Home() {
                                     return (
                                       <div
                                         key={campaign.id}
-                                        className={`tree-row tree-row-campaign${isCampSelected && selectionLevel === "campaign" ? " is-selected" : ""}`}
+                                        className={`tree-row tree-row-campaign${isCampSelected && selectionLevel === "campaign" ? " is-selected" : ""}${draggingCampaignId === campaign.id ? " is-dragging" : ""}`}
                                         onClick={() =>
                                           selectCampaign(client.id, project.id, campaign.id)
                                         }
@@ -2629,6 +2782,15 @@ export default function Home() {
                                             campaign.name
                                           )
                                         }
+                                        draggable={!isEditingCamp}
+                                        onDragStart={(e) =>
+                                          onCampaignDragStart(e, {
+                                            campaignId: campaign.id,
+                                            sourceClientId: client.id,
+                                            sourceProjectId: project.id,
+                                          })
+                                        }
+                                        onDragEnd={onCampaignDragEnd}
                                       >
                                         {isEditingCamp ? (
                                           <input
@@ -2685,7 +2847,7 @@ export default function Home() {
                                     className="tree-add-row tree-add-row-campaign"
                                     onClick={() => addCampaign(client.id, project.id)}
                                   >
-                                    <IconPlus /> Add Creative
+                                    <IconPlus /> New Ad
                                   </button>
                                 </div>
                               </div>
@@ -2698,7 +2860,7 @@ export default function Home() {
                           className="tree-add-row tree-add-row-project"
                           onClick={() => addProject(client.id)}
                         >
-                          <IconPlus /> Add Project
+                          <IconPlus /> New Project
                         </button>
                       </div>
                     </div>
