@@ -9,6 +9,8 @@ export type StoryExportScene = {
   ctaVisible: boolean;
   ctaBgColor: string;
   ctaTextColor: string;
+  ctaOffsetX?: number;
+  ctaOffsetY?: number;
   media: { kind: "image"; url: string } | { kind: "video"; url: string } | { kind: "none" };
 };
 
@@ -40,6 +42,7 @@ export type StoryExportAssets = {
   commentIcon: HTMLImageElement | null;
   sendIcon: HTMLImageElement | null;
   repostIcon: HTMLImageElement | null;
+  storyLinkIcon: HTMLImageElement | null;
   navHomeInactiveIcon: HTMLImageElement | null;
   navReelsActiveIcon: HTMLImageElement | null;
   navSendIcon: HTMLImageElement | null;

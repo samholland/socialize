@@ -14,6 +14,10 @@ import {
 } from "./preview-canvas/constants";
 import { drawFeedSurface } from "@/rendering/feed/renderFeedSurface";
 import { drawStoryLikeSurface } from "./preview-canvas/renderStoryLikeSurface";
+import {
+  isPointInStoryCtaPill,
+  type StoryCtaPillLayout,
+} from "@/export/story/storyCtaLayout";
 import type { Layout, MediaAspect, PreviewMedia, Rect } from "./preview-canvas/types";
 import { normalizeHexColor, roundedRectPath, storySurfaceFromPlatform } from "./preview-canvas/utils";
 
@@ -46,6 +50,9 @@ type Props = {
   instagramFeedOverlayOffsetY?: number;
   mockupBackdropColor?: string;
   transparentPngExport?: boolean;
+  storyCtaOffsetX?: number;
+  storyCtaOffsetY?: number;
+  onStoryCtaOffsetChange?: (offsetX: number, offsetY: number) => void;
   onMediaChange: (media: PreviewMedia) => void;
 };
 
@@ -209,6 +216,9 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     instagramFeedOverlayOffsetY = 0,
     mockupBackdropColor = "#ffffff",
     transparentPngExport = false,
+    storyCtaOffsetX = 0,
+    storyCtaOffsetY = 0,
+    onStoryCtaOffsetChange,
     onMediaChange,
   }: Props,
   ref
@@ -222,8 +232,18 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
   const drawRef = useRef<
     (includeDebugOverlays?: boolean, transparentBackdrop?: boolean) => Promise<void>
   >(async () => {});
+  const storyCtaLayoutRef = useRef<StoryCtaPillLayout | null>(null);
+  const ignoreNextCanvasClickRef = useRef(false);
+  const storyCtaDragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    startOffsetX: number;
+    startOffsetY: number;
+  } | null>(null);
 
   const [isDragging, setIsDragging] = useState(false);
+  const [isStoryCtaDragging, setIsStoryCtaDragging] = useState(false);
   const [frameVersion, setFrameVersion] = useState(0);
 
   const layout = useMemo<Layout>(() => {
@@ -322,6 +342,9 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     const resolvedCtaBgColor = normalizeHexColor(ctaBgColor, "#4f94aa");
     const resolvedCtaTextColor = normalizeHexColor(ctaTextColor, "#ffffff");
     const storySurface = storySurfaceFromPlatform(platform);
+    if (platform !== "Instagram Story") {
+      storyCtaLayoutRef.current = null;
+    }
 
     if (storySurface) {
       await drawStoryLikeSurface({
@@ -332,6 +355,8 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
         ctaVisible,
         ctaBgColor: resolvedCtaBgColor,
         ctaTextColor: resolvedCtaTextColor,
+        ctaOffsetX: storyCtaOffsetX,
+        ctaOffsetY: storyCtaOffsetY,
         clientName,
         clientAvatarUrl,
         media,
@@ -340,8 +365,15 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
         loadImageFromUrl,
         backdropColor: normalizeHexColor(mockupBackdropColor, "#ffffff"),
         transparentBackdrop,
+        onStoryCtaLayout:
+          platform === "Instagram Story"
+            ? (layoutValue) => {
+                storyCtaLayoutRef.current = layoutValue;
+              }
+            : undefined,
       });
     } else {
+      storyCtaLayoutRef.current = null;
       await drawFeedSurface({
         ctx,
         layout,
@@ -390,6 +422,67 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     drawDragOverlay(ctx);
   }
   drawRef.current = draw;
+
+  function pointerToCanvasPoint(
+    event: React.PointerEvent<HTMLCanvasElement>
+  ): { x: number; y: number } | null {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+      x: (event.clientX - rect.left) * scaleX,
+      y: (event.clientY - rect.top) * scaleY,
+    };
+  }
+
+  function onCanvasPointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (
+      platform !== "Instagram Story" ||
+      !ctaVisible ||
+      !onStoryCtaOffsetChange ||
+      !storyCtaLayoutRef.current
+    ) {
+      return;
+    }
+    const point = pointerToCanvasPoint(event);
+    if (!point) return;
+    if (!isPointInStoryCtaPill(storyCtaLayoutRef.current, point.x, point.y)) {
+      return;
+    }
+
+    event.preventDefault();
+    ignoreNextCanvasClickRef.current = true;
+    storyCtaDragRef.current = {
+      pointerId: event.pointerId,
+      startX: point.x,
+      startY: point.y,
+      startOffsetX: storyCtaOffsetX,
+      startOffsetY: storyCtaOffsetY,
+    };
+    setIsStoryCtaDragging(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function onCanvasPointerMove(event: React.PointerEvent<HTMLCanvasElement>) {
+    const drag = storyCtaDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || !onStoryCtaOffsetChange) return;
+    const point = pointerToCanvasPoint(event);
+    if (!point) return;
+    const nextX = Math.max(-360, Math.min(360, drag.startOffsetX + (point.x - drag.startX)));
+    const nextY = Math.max(-640, Math.min(640, drag.startOffsetY + (point.y - drag.startY)));
+    onStoryCtaOffsetChange(Math.round(nextX), Math.round(nextY));
+  }
+
+  function stopStoryCtaDrag(pointerId?: number) {
+    const drag = storyCtaDragRef.current;
+    if (!drag) return;
+    if (typeof pointerId === "number" && drag.pointerId !== pointerId) return;
+    storyCtaDragRef.current = null;
+    setIsStoryCtaDragging(false);
+  }
 
   useImperativeHandle(ref, () => ({
     async exportCanvas(): Promise<Blob | null> {
@@ -456,6 +549,7 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     headline,
     url,
     cta,
+    ctaVisible,
     ctaBgColor,
     ctaTextColor,
     platform,
@@ -471,7 +565,10 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     instagramFeedOverlayOffsetY,
     mockupBackdropColor,
     transparentPngExport,
+    storyCtaOffsetX,
+    storyCtaOffsetY,
     isDragging,
+    isStoryCtaDragging,
     frameVersion,
   ]);
 
@@ -569,6 +666,11 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
   }
 
   function handleCanvasClick() {
+    if (ignoreNextCanvasClickRef.current) {
+      ignoreNextCanvasClickRef.current = false;
+      return;
+    }
+    if (media.kind !== "none") return;
     fileInputRef.current?.click();
   }
 
@@ -604,11 +706,20 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
 
       <canvas
         ref={canvasRef}
-        onClick={media.kind === "none" ? handleCanvasClick : undefined}
+        onClick={handleCanvasClick}
+        onPointerDown={onCanvasPointerDown}
+        onPointerMove={onCanvasPointerMove}
+        onPointerUp={(event) => stopStoryCtaDrag(event.pointerId)}
+        onPointerCancel={(event) => stopStoryCtaDrag(event.pointerId)}
+        onLostPointerCapture={(event) => stopStoryCtaDrag(event.pointerId)}
         style={{
           width: DISPLAY_WIDTH,
           display: "block",
-          cursor: media.kind === "none" ? "pointer" : "default",
+          cursor: isStoryCtaDragging
+            ? "grabbing"
+            : media.kind === "none"
+              ? "pointer"
+              : "default",
           borderRadius: 0,
         }}
       />

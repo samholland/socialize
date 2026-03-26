@@ -4,6 +4,7 @@ import {
 } from "@/export/story/constants";
 import { renderStoryExportFrame } from "@/export/story/renderFrame";
 import { buildStorySceneModel } from "@/export/story/sceneModel";
+import type { StoryCtaPillLayout } from "@/export/story/storyCtaLayout";
 import type {
   StoryExportAssets,
   StoryFrameMediaSource,
@@ -20,6 +21,8 @@ type DrawStoryLikeSurfaceArgs = {
   ctaVisible: boolean;
   ctaBgColor: string;
   ctaTextColor: string;
+  ctaOffsetX?: number;
+  ctaOffsetY?: number;
   clientName: string;
   clientAvatarUrl?: string;
   media: PreviewMedia;
@@ -28,6 +31,7 @@ type DrawStoryLikeSurfaceArgs = {
   loadImageFromUrl: (url: string | undefined) => Promise<HTMLImageElement | null>;
   backdropColor: string;
   transparentBackdrop: boolean;
+  onStoryCtaLayout?: (layout: StoryCtaPillLayout | null) => void;
 };
 
 export async function drawStoryLikeSurface({
@@ -38,6 +42,8 @@ export async function drawStoryLikeSurface({
   ctaVisible,
   ctaBgColor,
   ctaTextColor,
+  ctaOffsetX = 0,
+  ctaOffsetY = 0,
   clientName,
   clientAvatarUrl,
   media,
@@ -46,6 +52,7 @@ export async function drawStoryLikeSurface({
   loadImageFromUrl,
   backdropColor,
   transparentBackdrop,
+  onStoryCtaLayout,
 }: DrawStoryLikeSurfaceArgs) {
   const scene = buildStorySceneModel({
     surface,
@@ -56,6 +63,8 @@ export async function drawStoryLikeSurface({
     ctaVisible,
     ctaBgColor,
     ctaTextColor,
+    ctaOffsetX,
+    ctaOffsetY,
     media: toStoryExportMedia(media),
   });
 
@@ -66,6 +75,7 @@ export async function drawStoryLikeSurface({
     commentIcon,
     sendIcon,
     repostIcon,
+    storyLinkIcon,
     navHomeInactiveIcon,
     navReelsActiveIcon,
     navSendIcon,
@@ -78,6 +88,7 @@ export async function drawStoryLikeSurface({
     loadImageFromUrl(STORY_ICON_PATHS.comment),
     loadImageFromUrl(STORY_ICON_PATHS.send),
     loadImageFromUrl(STORY_ICON_PATHS.repost),
+    loadImageFromUrl(STORY_ICON_PATHS.storyLink),
     loadImageFromUrl(STORY_REELS_NAV_ICON_PATHS.homeInactive),
     loadImageFromUrl(STORY_REELS_NAV_ICON_PATHS.reelsActive),
     loadImageFromUrl(STORY_REELS_NAV_ICON_PATHS.send),
@@ -93,6 +104,7 @@ export async function drawStoryLikeSurface({
     commentIcon,
     sendIcon,
     repostIcon,
+    storyLinkIcon,
     navHomeInactiveIcon,
     navReelsActiveIcon,
     navSendIcon,
@@ -126,6 +138,7 @@ export async function drawStoryLikeSurface({
     {
       backdropColor,
       transparentBackdrop,
+      onStoryCtaLayout,
     }
   );
 }

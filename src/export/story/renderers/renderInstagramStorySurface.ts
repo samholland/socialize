@@ -7,6 +7,7 @@ import type {
   StoryExportAssets,
   StoryFrameMediaSource,
 } from "../types";
+import type { StoryCtaPillLayout } from "../storyCtaLayout";
 
 type Rect = { x: number; y: number; w: number; h: number };
 type Layout = { frame: Rect; screen: Rect; screenRadius: number; scale: number };
@@ -61,9 +62,11 @@ type InstagramStoryRenderHelpers = {
     screen: Rect,
     scale: number,
     ctaText: string,
-    bgColor: string,
-    textColor: string
-  ) => void;
+    iconColor: string,
+    icon: HTMLImageElement | null,
+    offsetX: number,
+    offsetY: number
+  ) => StoryCtaPillLayout;
   fitText: (text: string, maxChars: number) => string;
 };
 
@@ -75,6 +78,7 @@ type RenderInstagramStorySurfaceArgs = {
   elapsedMs: number;
   durationMs: number;
   mediaSource?: StoryFrameMediaSource;
+  onStoryCtaLayout?: (layout: StoryCtaPillLayout | null) => void;
   helpers: InstagramStoryRenderHelpers;
 };
 
@@ -86,6 +90,7 @@ export function renderInstagramStorySurface({
   elapsedMs,
   durationMs,
   mediaSource,
+  onStoryCtaLayout,
   helpers,
 }: RenderInstagramStorySurfaceArgs) {
   const domWrapperW = 340;
@@ -257,13 +262,18 @@ export function renderInstagramStorySurface({
   }
 
   if (scene.textLayer.cta.visible) {
-    helpers.drawStoryCtaPill(
+    const ctaLayout = helpers.drawStoryCtaPill(
       ctx,
       layout.screen,
       layout.screen.w / domScreenW,
       scene.textLayer.cta.label,
       scene.textLayer.cta.bgColor,
-      scene.textLayer.cta.textColor
+      assets.storyLinkIcon,
+      scene.textLayer.cta.offsetX,
+      scene.textLayer.cta.offsetY
     );
+    onStoryCtaLayout?.(ctaLayout);
+  } else {
+    onStoryCtaLayout?.(null);
   }
 }

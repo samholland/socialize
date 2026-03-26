@@ -1,7 +1,11 @@
 import {
   FONT_STACK,
-  STORY_LAYOUT,
 } from "./constants";
+import {
+  computeStoryCtaPillLayout,
+  STORY_CTA_FONT_STACK,
+  type StoryCtaPillLayout,
+} from "./storyCtaLayout";
 import {
   drawCover,
   drawTintedImage,
@@ -107,40 +111,60 @@ function drawStoryCtaPill(
   screen: Rect,
   scale: number,
   ctaText: string,
-  bgColor: string,
-  textColor: string
-) {
-  const text = fitText(ctaText || "Learn More", 16);
-  const width = Math.max(
-    STORY_LAYOUT.ctaMinWidth * scale,
-    ctx.measureText(text).width + 54 * scale
+  iconColor: string,
+  icon: HTMLImageElement | null,
+  offsetX = 0,
+  offsetY = 0
+): StoryCtaPillLayout {
+  const ctaLayout = computeStoryCtaPillLayout(
+    ctx,
+    screen,
+    scale,
+    ctaText,
+    offsetX,
+    offsetY
   );
-  const height = STORY_LAYOUT.ctaHeight * scale;
-  const x = screen.x + (screen.w - width) / 2;
-  const y = screen.y + screen.h - STORY_LAYOUT.ctaYFromBottom * scale;
+  const { frame, iconRect } = ctaLayout;
 
   ctx.save();
-  ctx.translate(x + width / 2, y + height / 2);
-  ctx.rotate((-6 * Math.PI) / 180);
-  ctx.translate(-(x + width / 2), -(y + height / 2));
+  ctx.translate(frame.x + frame.w / 2, frame.y + frame.h / 2);
+  ctx.rotate(ctaLayout.rotationRad);
+  ctx.translate(-(frame.x + frame.w / 2), -(frame.y + frame.h / 2));
 
-  ctx.fillStyle = normalizeHexColor(bgColor, "#4f94aa");
-  fillRoundedRect(ctx, { x, y, w: width, h: height }, STORY_LAYOUT.ctaRadius * scale);
+  ctx.fillStyle = "#ffffff";
+  fillRoundedRect(ctx, frame, ctaLayout.cornerRadius);
 
-  const resolvedText = normalizeHexColor(textColor, "#ffffff");
-  ctx.strokeStyle = resolvedText;
-  ctx.lineWidth = Math.max(1, 2 * scale);
-  ctx.beginPath();
-  ctx.arc(x + 20 * scale, y + 19 * scale, 7 * scale, Math.PI * 0.15, Math.PI * 1.15);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(x + 30 * scale, y + 19 * scale, 7 * scale, Math.PI * 1.15, Math.PI * 2.15);
-  ctx.stroke();
+  const resolvedIconColor = normalizeHexColor(iconColor, "#0b90ff");
+  if (icon) {
+    drawTintedImage(ctx, icon, iconRect, resolvedIconColor);
+  } else {
+    ctx.strokeStyle = resolvedIconColor;
+    ctx.lineWidth = Math.max(1, 2 * scale);
+    ctx.beginPath();
+    ctx.arc(
+      frame.x + 20 * scale,
+      frame.y + frame.h * 0.5,
+      7 * scale,
+      Math.PI * 0.15,
+      Math.PI * 1.15
+    );
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(
+      frame.x + 30 * scale,
+      frame.y + frame.h * 0.5,
+      7 * scale,
+      Math.PI * 1.15,
+      Math.PI * 2.15
+    );
+    ctx.stroke();
+  }
 
-  ctx.fillStyle = resolvedText;
-  ctx.font = `700 ${12 * scale}px ${FONT_STACK}`;
-  ctx.fillText(text, x + 44 * scale, y + 24 * scale);
+  ctx.fillStyle = "#0b1119";
+  ctx.font = `700 ${12.6 * scale}px ${STORY_CTA_FONT_STACK}`;
+  ctx.fillText(ctaLayout.text, ctaLayout.textX, ctaLayout.textY);
   ctx.restore();
+  return ctaLayout;
 }
 
 function drawStoryCtaBar(
@@ -214,7 +238,8 @@ function drawInstagramStorySurface(
   assets: StoryExportAssets,
   elapsedMs: number,
   durationMs: number,
-  mediaSource?: StoryFrameMediaSource
+  mediaSource?: StoryFrameMediaSource,
+  onStoryCtaLayout?: (layout: StoryCtaPillLayout | null) => void
 ) {
   renderInstagramStorySurface({
     ctx,
@@ -224,6 +249,7 @@ function drawInstagramStorySurface(
     elapsedMs,
     durationMs,
     mediaSource,
+    onStoryCtaLayout,
     helpers: {
       drawStoryStatusBar,
       drawStoryMedia,
@@ -298,6 +324,7 @@ export function renderStoryExportFrame(
   options?: {
     backdropColor?: string;
     transparentBackdrop?: boolean;
+    onStoryCtaLayout?: (layout: StoryCtaPillLayout | null) => void;
   }
 ) {
   const layout = computeLayout(scene);
@@ -321,8 +348,18 @@ export function renderStoryExportFrame(
   ctx.clip();
 
   if (scene.surface === "instagram-story") {
-    drawInstagramStorySurface(ctx, scene, layout, assets, elapsedMs, durationMs, mediaSource);
+    drawInstagramStorySurface(
+      ctx,
+      scene,
+      layout,
+      assets,
+      elapsedMs,
+      durationMs,
+      mediaSource,
+      options?.onStoryCtaLayout
+    );
   } else {
+    options?.onStoryCtaLayout?.(null);
     drawShortVideoSurface(ctx, scene, layout, assets, elapsedMs, durationMs, mediaSource);
   }
 

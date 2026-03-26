@@ -30,6 +30,8 @@ type StorySceneCta = {
   visible: boolean;
   bgColor: string;
   textColor: string;
+  offsetX: number;
+  offsetY: number;
 };
 
 type StorySceneTextLayer = {
@@ -122,6 +124,14 @@ export function buildStorySceneModel(scene: StoryExportScene): StorySceneModel {
         visible: scene.ctaVisible,
         bgColor: scene.ctaBgColor,
         textColor: scene.ctaTextColor,
+        offsetX:
+          typeof scene.ctaOffsetX === "number" && Number.isFinite(scene.ctaOffsetX)
+            ? scene.ctaOffsetX
+            : 0,
+        offsetY:
+          typeof scene.ctaOffsetY === "number" && Number.isFinite(scene.ctaOffsetY)
+            ? scene.ctaOffsetY
+            : 0,
       },
     },
     media: buildStorySceneMedia(scene),

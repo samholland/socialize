@@ -16,6 +16,7 @@ export const STORY_ICON_PATHS = {
   comment: "/images/ig_comment.svg",
   send: "/images/ig_send.svg",
   repost: "/images/ig_repost.svg",
+  storyLink: "/images/ig_story_link.svg",
 } as const;
 
 export const STORY_REELS_NAV_ICON_PATHS = {

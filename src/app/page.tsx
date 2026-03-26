@@ -25,6 +25,15 @@ import {
   saveWorkspaceData,
   type CloudAppData,
 } from "@/lib/cloud/workspaces";
+import {
+  deleteLocalMediaAsset,
+  deleteLocalMediaAssets,
+  getLocalWorkspaceState,
+  listLocalMediaAssetsForWorkspace,
+  listLocalWorkspaceStates,
+  putLocalMediaAsset,
+  setLocalWorkspaceState,
+} from "@/lib/local/indexedDb";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -110,6 +119,30 @@ type PendingUndo = {
   label: string;
   restore: () => void;
   timerId: ReturnType<typeof setTimeout>;
+};
+
+type LocalDebugStats = {
+  generatedAtIso: string;
+  debugWorkspaceId: string;
+  activeWorkspaceKind: WorkspaceKind;
+  workspaceSnapshot: {
+    exists: boolean;
+    clients: number;
+    projects: number;
+    campaigns: number;
+    bytes: number;
+  };
+  media: {
+    count: number;
+    images: number;
+    videos: number;
+    bytes: number;
+  };
+  localStorage: {
+    uiBytes: number;
+    legacyWorkspaceKeys: number;
+    legacyWorkspaceBytes: number;
+  };
 };
 
 type CampaignDragPayload = {
@@ -512,7 +545,9 @@ function loadActiveWsId(workspaces: Workspace[]): string {
   return workspaces[0]?.id ?? "ws_default";
 }
 
-function loadWorkspaceData(wsId: string): { data: AppData; selection: Selection; level: SelectionLevel } {
+function loadWorkspaceDataFromLocalStorage(
+  wsId: string
+): { data: AppData; selection: Selection; level: SelectionLevel } {
   if (typeof window === "undefined") {
     const data = emptyWorkspace();
     return { data, selection: defaultSelection(data), level: "campaign" };
@@ -543,65 +578,94 @@ function loadWorkspaceData(wsId: string): { data: AppData; selection: Selection;
   }
 }
 
-function loadPrimaryLocalWorkspaceState(): {
+type WorkspaceStateSnapshot = {
   data: AppData;
   selection: Selection;
   level: SelectionLevel;
-} {
+};
+
+function snapshotHasData(snapshot: WorkspaceStateSnapshot): boolean {
+  return snapshot.data.clients.length > 0;
+}
+
+function cleanupLegacyWorkspaceStorage() {
+  if (typeof window === "undefined") return;
+  try {
+    const wsListRaw = localStorage.getItem(WORKSPACES_KEY);
+    const wsList = wsListRaw ? (JSON.parse(wsListRaw) as Workspace[]) : [];
+    for (const ws of wsList) {
+      localStorage.removeItem(WS_DATA_PREFIX + ws.id);
+    }
+    localStorage.removeItem(WS_DATA_PREFIX + LOCAL_WORKSPACE_ID);
+    localStorage.removeItem(WS_DATA_PREFIX + "ws_default");
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+  } catch {
+    // noop
+  }
+}
+
+async function loadPrimaryLocalWorkspaceState(): Promise<WorkspaceStateSnapshot> {
   if (typeof window === "undefined") {
     const data = emptyWorkspace();
     return { data, selection: defaultSelection(data), level: "campaign" };
   }
 
-  const localRaw = localStorage.getItem(WS_DATA_PREFIX + LOCAL_WORKSPACE_ID);
-  const local = loadWorkspaceData(LOCAL_WORKSPACE_ID);
-  if (localRaw || local.data.clients.length > 0) {
+  const indexed = await getLocalWorkspaceState<WorkspaceStateSnapshot>(LOCAL_WORKSPACE_ID);
+  if (indexed) {
+    const normalized = {
+      data: normalizeData(indexed.data),
+      selection: indexed.selection ?? defaultSelection(normalizeData(indexed.data)),
+      level:
+        indexed.level === "client" || indexed.level === "project"
+          ? indexed.level
+          : "campaign",
+    } satisfies WorkspaceStateSnapshot;
+    if (snapshotHasData(normalized)) {
+      return normalized;
+    }
+  }
+
+  const local = loadWorkspaceDataFromLocalStorage(LOCAL_WORKSPACE_ID);
+  if (snapshotHasData(local)) {
+    void setLocalWorkspaceState(LOCAL_WORKSPACE_ID, local);
+    cleanupLegacyWorkspaceStorage();
     return local;
   }
 
-  const oldDefault = loadWorkspaceData("ws_default");
-  if (oldDefault.data.clients.length > 0) {
-    const serialized = JSON.stringify(oldDefault);
-    const localKey = WS_DATA_PREFIX + LOCAL_WORKSPACE_ID;
-    const oldKey = WS_DATA_PREFIX + "ws_default";
-    let wrote = safeSetLocalStorage(localKey, serialized);
-    // If quota is tight, move instead of copy by freeing the old key first.
-    if (!wrote) {
-      localStorage.removeItem(oldKey);
-      wrote = safeSetLocalStorage(localKey, serialized);
-    } else {
-      localStorage.removeItem(oldKey);
-    }
-    if (!wrote) {
-      // Keep using old payload in-memory this session even if persistence is full.
-      return oldDefault;
-    }
+  const oldDefault = loadWorkspaceDataFromLocalStorage("ws_default");
+  if (snapshotHasData(oldDefault)) {
+    void setLocalWorkspaceState(LOCAL_WORKSPACE_ID, oldDefault);
+    cleanupLegacyWorkspaceStorage();
     return oldDefault;
   }
 
   const wsList = loadWorkspaceList();
   const oldActive = loadActiveWsId(wsList);
-  const migrated = loadWorkspaceData(oldActive);
-  if (migrated.data.clients.length > 0) {
-    const serialized = JSON.stringify(migrated);
-    const localKey = WS_DATA_PREFIX + LOCAL_WORKSPACE_ID;
-    const oldKey = WS_DATA_PREFIX + oldActive;
-    let wrote = safeSetLocalStorage(localKey, serialized);
-    if (!wrote && oldKey !== localKey) {
-      localStorage.removeItem(oldKey);
-      wrote = safeSetLocalStorage(localKey, serialized);
-    } else if (wrote && oldKey !== localKey) {
-      localStorage.removeItem(oldKey);
-    }
-    if (!wrote) return migrated;
+  const migrated = loadWorkspaceDataFromLocalStorage(oldActive);
+  if (snapshotHasData(migrated)) {
+    void setLocalWorkspaceState(LOCAL_WORKSPACE_ID, migrated);
+    cleanupLegacyWorkspaceStorage();
     return migrated;
   }
 
   return local;
 }
 
-function getLegacyWorkspaceForImport(): AppData | null {
+async function getLegacyWorkspaceForImport(): Promise<AppData | null> {
   if (typeof window === "undefined") return null;
+
+  const indexedLocal = await getLocalWorkspaceState<WorkspaceStateSnapshot>(LOCAL_WORKSPACE_ID);
+  if (indexedLocal?.data?.clients?.length) {
+    return normalizeData(indexedLocal.data);
+  }
+
+  const indexedStates = await listLocalWorkspaceStates<WorkspaceStateSnapshot>();
+  for (const state of indexedStates) {
+    if (state.state?.data?.clients?.length) {
+      return normalizeData(state.state.data);
+    }
+  }
+
   try {
     const localRaw = localStorage.getItem(WS_DATA_PREFIX + LOCAL_WORKSPACE_ID);
     if (localRaw) {
@@ -665,6 +729,7 @@ type UiPrefs = {
   transparentPngExport: boolean;
   expandedClients: Record<string, boolean>;
   expandedProjects: Record<string, boolean>;
+  storyCtaOffsets: Record<string, { x: number; y: number }>;
 };
 
 function normalizeBooleanRecord(
@@ -680,6 +745,23 @@ function normalizeBooleanRecord(
   );
 }
 
+function normalizeStoryCtaOffsets(
+  value: unknown
+): Record<string, { x: number; y: number }> {
+  if (!value || typeof value !== "object") return {};
+  return Object.entries(value as Record<string, unknown>).reduce<
+    Record<string, { x: number; y: number }>
+  >((acc, [key, entry]) => {
+    if (!entry || typeof entry !== "object") return acc;
+    const x = (entry as { x?: unknown }).x;
+    const y = (entry as { y?: unknown }).y;
+    if (typeof x !== "number" || !Number.isFinite(x)) return acc;
+    if (typeof y !== "number" || !Number.isFinite(y)) return acc;
+    acc[key] = { x: Math.round(x), y: Math.round(y) };
+    return acc;
+  }, {});
+}
+
 function loadUiPrefs(): UiPrefs {
   const fallback: UiPrefs = {
     panelWidths: [260, 420],
@@ -693,6 +775,7 @@ function loadUiPrefs(): UiPrefs {
     transparentPngExport: false,
     expandedClients: {},
     expandedProjects: {},
+    storyCtaOffsets: {},
   };
   if (typeof window === "undefined") return fallback;
   try {
@@ -710,6 +793,7 @@ function loadUiPrefs(): UiPrefs {
       transparentPngExport?: boolean;
       expandedClients?: Record<string, boolean>;
       expandedProjects?: Record<string, boolean>;
+      storyCtaOffsets?: Record<string, { x: number; y: number }>;
     };
     const opacity =
       typeof parsed.igFeedOverlayOpacity === "number"
@@ -748,6 +832,7 @@ function loadUiPrefs(): UiPrefs {
           : fallback.transparentPngExport,
       expandedClients: normalizeBooleanRecord(parsed.expandedClients),
       expandedProjects: normalizeBooleanRecord(parsed.expandedProjects),
+      storyCtaOffsets: normalizeStoryCtaOffsets(parsed.storyCtaOffsets),
     };
   } catch {
     return fallback;
@@ -757,6 +842,35 @@ function loadUiPrefs(): UiPrefs {
 function formatCsvCell(v: string): string {
   const n = v.replace(/\r?\n/g, " ");
   return /[",]/.test(n) ? `"${n.replaceAll('"', '""')}"` : n;
+}
+
+function measureUtf8Bytes(value: string): number {
+  if (!value) return 0;
+  return new TextEncoder().encode(value).length;
+}
+
+function formatBytes(bytes: number): string {
+  const abs = Math.max(0, bytes);
+  if (abs < 1024) return `${abs} B`;
+  if (abs < 1024 * 1024) return `${(abs / 1024).toFixed(1)} KB`;
+  return `${(abs / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function countWorkspaceEntities(data: AppData): {
+  clients: number;
+  projects: number;
+  campaigns: number;
+} {
+  const clients = data.clients.length;
+  let projects = 0;
+  let campaigns = 0;
+  for (const client of data.clients) {
+    projects += client.projects.length;
+    for (const project of client.projects) {
+      campaigns += project.campaigns.length;
+    }
+  }
+  return { clients, projects, campaigns };
 }
 
 function generateProjectCsv(client: Client, project: Project): string {
@@ -845,13 +959,19 @@ function slugify(name: string): string {
 function IconChevron({ open }: { open: boolean }) {
   return (
     <svg
-      width="10"
-      height="10"
-      viewBox="0 0 10 10"
-      fill="currentColor"
-      style={{ transition: "transform 150ms ease", transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
+      width="11"
+      height="11"
+      viewBox="0 0 32 32"
+      fill="none"
+      style={{
+        transition: "transform 150ms ease",
+        transform: open ? "rotate(90deg)" : "rotate(0deg)",
+      }}
     >
-      <path d="M3 2l4 3-4 3V2z" />
+      <path
+        d="M11.9,25c0-.3,0-.5.3-.7l8.3-8.3L12.1,7.7c-.6-.5-.3-1.5.4-1.7.3,0,.7,0,1,.3l9,9c.4.4.4,1,0,1.4l-9,9c-.5.5-1.5.3-1.7-.4v-.3h0Z"
+        fill="currentColor"
+      />
     </svg>
   );
 }
@@ -1030,19 +1150,29 @@ export default function Home() {
     setTransparentPngExport(ui.transparentPngExport);
     setExpandedClients(ui.expandedClients);
     setExpandedProjects(ui.expandedProjects);
+    setStoryCtaOffsets(ui.storyCtaOffsets);
   }, []);
 
   // Local-only bootstrap
   useEffect(() => {
     if (cloudEnabled) return;
-    const wsData = loadPrimaryLocalWorkspaceState();
-    setWorkspaces([DEFAULT_WS]);
-    setActiveWorkspaceId(DEFAULT_WS.id);
-    hydratedWorkspaceRef.current = DEFAULT_WS.id;
-    setData(wsData.data);
-    setSelection(wsData.selection);
-    setSelectionLevel(wsData.level);
-    setStorageReady(true);
+    let cancelled = false;
+    void (async () => {
+      const wsData = await loadPrimaryLocalWorkspaceState();
+      if (cancelled) return;
+      setWorkspaces([DEFAULT_WS]);
+      setActiveWorkspaceId(DEFAULT_WS.id);
+      hydratedWorkspaceRef.current = DEFAULT_WS.id;
+      setData(wsData.data);
+      setSelection(wsData.selection);
+      setSelectionLevel(wsData.level);
+      await hydrateLocalMediaForWorkspace(DEFAULT_WS.id, wsData.data);
+      setStorageReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cloudEnabled]);
 
   // Supabase auth bootstrap
@@ -1083,6 +1213,7 @@ export default function Home() {
       setWorkspaces([DEFAULT_WS]);
       setActiveWorkspaceId(DEFAULT_WS.id);
       setData(DEFAULT_EMPTY_DATA);
+      replaceCampaignMedia({});
       setSelection(DEFAULT_SELECTION);
       setSelectionLevel("campaign");
       return;
@@ -1091,7 +1222,7 @@ export default function Home() {
     let cancelled = false;
     void (async () => {
       try {
-        const localState = loadPrimaryLocalWorkspaceState();
+        const localState = await loadPrimaryLocalWorkspaceState();
         const personal = await ensureProfileAndPersonalWorkspace(supabase, authUser);
         const wsList = await listAccessibleWorkspaces(supabase, authUser.id);
         const cloudWorkspaces =
@@ -1122,6 +1253,7 @@ export default function Home() {
           setData(localState.data);
           setSelection(localState.selection);
           setSelectionLevel(localState.level);
+          await hydrateLocalMediaForWorkspace(wsId, localState.data);
           setStorageReady(true);
           setCloudHydrated(true);
         } else {
@@ -1145,7 +1277,7 @@ export default function Home() {
         if (typeof window !== "undefined") {
           const importKey = CLOUD_IMPORT_DONE_PREFIX + authUser.id;
           if (!localStorage.getItem(importKey)) {
-            const legacy = getLegacyWorkspaceForImport();
+            const legacy = await getLegacyWorkspaceForImport();
             if (legacy?.clients?.length) {
               setShowImportPrompt(true);
             }
@@ -1165,6 +1297,10 @@ export default function Home() {
   // Export panel
   const [exportPanelOpen, setExportPanelOpen] = useState(false);
   const [isVideoRecordingExport, setIsVideoRecordingExport] = useState(false);
+  const [debugPanelOpen, setDebugPanelOpen] = useState(false);
+  const [debugPanelLoading, setDebugPanelLoading] = useState(false);
+  const [debugPanelError, setDebugPanelError] = useState<string | null>(null);
+  const [localDebugStats, setLocalDebugStats] = useState<LocalDebugStats | null>(null);
 
   // Undo
   const [pendingUndo, setPendingUndo] = useState<PendingUndo | null>(null);
@@ -1185,6 +1321,9 @@ export default function Home() {
   // Tree expand/collapse
   const [expandedClients, setExpandedClients] = useState<Record<string, boolean>>({});
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
+  const [storyCtaOffsets, setStoryCtaOffsets] = useState<
+    Record<string, { x: number; y: number }>
+  >({});
   const [draggingCampaignId, setDraggingCampaignId] = useState<string | null>(null);
   const [draggingCampaignPayload, setDraggingCampaignPayload] =
     useState<CampaignDragPayload | null>(null);
@@ -1223,6 +1362,82 @@ export default function Home() {
     return `${workspaceId}::project::${projectId}`;
   }
 
+  function storyCtaOffsetKey(campaignId: string, workspaceId = activeWorkspaceId): string {
+    return `${workspaceId}::story-cta::${campaignId}`;
+  }
+
+  const refreshLocalDebugStats = useCallback(async () => {
+    if (typeof window === "undefined") return;
+    const debugWorkspaceId = LOCAL_WORKSPACE_ID;
+    setDebugPanelLoading(true);
+    setDebugPanelError(null);
+    try {
+      const snapshot = await getLocalWorkspaceState<WorkspaceStateSnapshot>(debugWorkspaceId);
+      const mediaAssets = await listLocalMediaAssetsForWorkspace(debugWorkspaceId);
+      const workspaceData = snapshot?.data ? normalizeData(snapshot.data) : emptyWorkspace();
+      const entityCounts = countWorkspaceEntities(workspaceData);
+      const snapshotBytes = snapshot ? measureUtf8Bytes(JSON.stringify(snapshot)) : 0;
+
+      let images = 0;
+      let videos = 0;
+      let mediaBytes = 0;
+      for (const asset of mediaAssets) {
+        if (asset.kind === "image") images += 1;
+        else videos += 1;
+        mediaBytes += asset.blob.size;
+      }
+
+      let legacyWorkspaceKeys = 0;
+      let legacyWorkspaceBytes = 0;
+      for (let i = 0; i < localStorage.length; i += 1) {
+        const key = localStorage.key(i);
+        if (!key) continue;
+        if (key === LEGACY_STORAGE_KEY || key.startsWith(WS_DATA_PREFIX)) {
+          legacyWorkspaceKeys += 1;
+          const value = localStorage.getItem(key) ?? "";
+          legacyWorkspaceBytes += measureUtf8Bytes(value);
+        }
+      }
+
+      const uiKeys = [UI_KEY, WORKSPACES_KEY, ACTIVE_WS_KEY, CLOUD_ACTIVE_WS_KEY];
+      let uiBytes = 0;
+      for (const key of uiKeys) {
+        const value = localStorage.getItem(key);
+        if (!value) continue;
+        uiBytes += measureUtf8Bytes(value);
+      }
+
+      setLocalDebugStats({
+        generatedAtIso: new Date().toISOString(),
+        debugWorkspaceId,
+        activeWorkspaceKind: activeWorkspace.kind,
+        workspaceSnapshot: {
+          exists: Boolean(snapshot),
+          clients: entityCounts.clients,
+          projects: entityCounts.projects,
+          campaigns: entityCounts.campaigns,
+          bytes: snapshotBytes,
+        },
+        media: {
+          count: mediaAssets.length,
+          images,
+          videos,
+          bytes: mediaBytes,
+        },
+        localStorage: {
+          uiBytes,
+          legacyWorkspaceKeys,
+          legacyWorkspaceBytes,
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load debug stats.";
+      setDebugPanelError(message);
+    } finally {
+      setDebugPanelLoading(false);
+    }
+  }, [activeWorkspace.kind]);
+
   // ── Persistence ────────────────────────────────────────────────
 
   // Persist workspace list + active workspace id
@@ -1244,10 +1459,11 @@ export default function Home() {
   useEffect(() => {
     if (!storageReady) return;
     if (!cloudEnabled || activeWorkspaceIsLocal) {
-      safeSetLocalStorage(
-        WS_DATA_PREFIX + activeWorkspaceId,
-        JSON.stringify({ data, selection, level: selectionLevel })
-      );
+      void setLocalWorkspaceState(activeWorkspaceId, {
+        data,
+        selection,
+        level: selectionLevel,
+      });
       return;
     }
     if (!supabase || !authUser || !cloudHydrated) return;
@@ -1299,6 +1515,7 @@ export default function Home() {
         transparentPngExport,
         expandedClients,
         expandedProjects,
+        storyCtaOffsets,
       })
     );
   }, [
@@ -1314,17 +1531,24 @@ export default function Home() {
     transparentPngExport,
     expandedClients,
     expandedProjects,
+    storyCtaOffsets,
   ]);
 
   useEffect(() => {
     campaignMediaRef.current = campaignMedia;
   }, [campaignMedia]);
 
+  useEffect(() => {
+    if (!debugPanelOpen) return;
+    if (!storageReady) return;
+    void refreshLocalDebugStats();
+  }, [debugPanelOpen, storageReady, activeWorkspaceId, refreshLocalDebugStats]);
+
   // Cleanup blob URLs on unmount
   useEffect(() => {
     return () => {
       for (const m of Object.values(campaignMediaRef.current)) {
-        if (m.kind !== "none") URL.revokeObjectURL(m.url);
+        if (m.kind !== "none") revokeMediaUrl(m.url);
       }
     };
   }, []);
@@ -1395,6 +1619,62 @@ export default function Home() {
 
   // ── Media helpers ──────────────────────────────────────────────
 
+  function revokeMediaUrl(url: string) {
+    if (url.startsWith("blob:")) {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  function replaceCampaignMedia(nextCampaignMedia: Record<string, PreviewMedia>) {
+    setCampaignMediaMap((prev) => {
+      for (const [campaignId, media] of Object.entries(prev)) {
+        const next = nextCampaignMedia[campaignId];
+        if (media.kind === "none") continue;
+        if (!next || next.kind === "none" || next.url !== media.url) {
+          revokeMediaUrl(media.url);
+        }
+      }
+      return nextCampaignMedia;
+    });
+  }
+
+  async function hydrateLocalMediaForWorkspace(
+    workspaceId: string,
+    nextData: AppData
+  ) {
+    const assets = await listLocalMediaAssetsForWorkspace(workspaceId);
+    if (assets.length === 0) {
+      replaceCampaignMedia({});
+      return;
+    }
+
+    const validCampaignIds = new Set(
+      nextData.clients.flatMap((client) =>
+        client.projects.flatMap((project) =>
+          project.campaigns.map((campaign) => campaign.id)
+        )
+      )
+    );
+
+    const orphanedIds: string[] = [];
+    const nextCampaignMedia: Record<string, PreviewMedia> = {};
+    for (const asset of assets) {
+      if (!validCampaignIds.has(asset.campaignId)) {
+        orphanedIds.push(asset.campaignId);
+        continue;
+      }
+      nextCampaignMedia[asset.campaignId] = {
+        kind: asset.kind,
+        url: URL.createObjectURL(asset.blob),
+      };
+    }
+
+    if (orphanedIds.length > 0) {
+      void deleteLocalMediaAssets(workspaceId, orphanedIds);
+    }
+    replaceCampaignMedia(nextCampaignMedia);
+  }
+
   async function hydrateSignedMediaForWorkspace(
     workspaceId: string,
     nextData: AppData
@@ -1411,7 +1691,7 @@ export default function Home() {
       byCampaign.set(campaign.id, { path: campaign.mediaStoragePath, kind });
     }
     if (byCampaign.size === 0) {
-      setCampaignMediaMap({});
+      replaceCampaignMedia({});
       return;
     }
 
@@ -1438,25 +1718,28 @@ export default function Home() {
       if (!signed) return;
       nextCampaignMedia[campaignId] = { kind: value.kind, url: signed };
     });
-    setCampaignMediaMap(nextCampaignMedia);
+    replaceCampaignMedia(nextCampaignMedia);
   }
 
   function setCampaignMedia(campaignId: string, media: PreviewMedia) {
     setCampaignMediaMap((prev) => {
       const cur = prev[campaignId];
       if (cur && cur.kind !== "none" && (media.kind === "none" || cur.url !== media.url)) {
-        URL.revokeObjectURL(cur.url);
+        revokeMediaUrl(cur.url);
       }
       return { ...prev, [campaignId]: media };
     });
   }
 
   function cleanupCampaignMedia(ids: string[]) {
+    if (activeWorkspaceIsLocal) {
+      void deleteLocalMediaAssets(activeWorkspaceId, ids);
+    }
     setCampaignMediaMap((prev) => {
       const next = { ...prev };
       for (const id of ids) {
         const m = next[id];
-        if (m && m.kind !== "none") URL.revokeObjectURL(m.url);
+        if (m && m.kind !== "none") revokeMediaUrl(m.url);
         delete next[id];
       }
       return next;
@@ -1564,7 +1847,7 @@ export default function Home() {
       return;
     }
 
-    if (cloudEnabled) {
+    if (cloudEnabled && !activeWorkspaceIsLocal) {
       try {
         const uploaded = await uploadMediaToCloud(campaignId, file);
         setCampaignMedia(campaignId, { kind: uploaded.kind, url: uploaded.url });
@@ -1596,6 +1879,15 @@ export default function Home() {
 
     const url = URL.createObjectURL(file);
     const mediaKind: "image" | "video" = file.type.startsWith("video/") ? "video" : "image";
+    const persisted = await putLocalMediaAsset(activeWorkspaceId, campaignId, {
+      kind: mediaKind,
+      blob: file,
+      mimeType: file.type,
+      fileName: file.name,
+    });
+    if (!persisted) {
+      console.warn("Failed to persist local media in IndexedDB.");
+    }
     setCampaignMedia(campaignId, { kind: mediaKind, url });
   }
 
@@ -1631,12 +1923,20 @@ export default function Home() {
     if (!target) return;
 
     if (target.kind === "local") {
-      const local = loadPrimaryLocalWorkspaceState();
-      hydratedWorkspaceRef.current = wsId;
-      setActiveWorkspaceId(wsId);
-      setData(local.data);
-      setSelection(local.selection);
-      setSelectionLevel(local.level);
+      setStorageReady(false);
+      void (async () => {
+        try {
+          const local = await loadPrimaryLocalWorkspaceState();
+          hydratedWorkspaceRef.current = wsId;
+          setActiveWorkspaceId(wsId);
+          setData(local.data);
+          setSelection(local.selection);
+          setSelectionLevel(local.level);
+          await hydrateLocalMediaForWorkspace(wsId, local.data);
+        } finally {
+          setStorageReady(true);
+        }
+      })();
       return;
     }
 
@@ -1665,16 +1965,33 @@ export default function Home() {
       })();
       return;
     }
-    // Save current workspace data before switching
-    safeSetLocalStorage(
-      WS_DATA_PREFIX + activeWorkspaceId,
-      JSON.stringify({ data, selection, level: selectionLevel })
-    );
-    const { data: newData, selection: newSel, level: newLevel } = loadWorkspaceData(wsId);
-    setData(newData);
-    setSelection(newSel);
-    setSelectionLevel(newLevel);
-    setActiveWorkspaceId(wsId);
+    setStorageReady(false);
+    void (async () => {
+      await setLocalWorkspaceState(activeWorkspaceId, {
+        data,
+        selection,
+        level: selectionLevel,
+      });
+      const indexed = await getLocalWorkspaceState<WorkspaceStateSnapshot>(wsId);
+      const next: WorkspaceStateSnapshot =
+        indexed && indexed.data
+          ? {
+              data: normalizeData(indexed.data),
+              selection: indexed.selection ?? defaultSelection(normalizeData(indexed.data)),
+              level:
+                indexed.level === "client" || indexed.level === "project"
+                  ? indexed.level
+                  : "campaign",
+            }
+          : loadWorkspaceDataFromLocalStorage(wsId);
+      hydratedWorkspaceRef.current = wsId;
+      setData(next.data);
+      setSelection(next.selection);
+      setSelectionLevel(next.level);
+      setActiveWorkspaceId(wsId);
+      await hydrateLocalMediaForWorkspace(wsId, next.data);
+      setStorageReady(true);
+    })();
   }
 
   function createWorkspace() {
@@ -1696,7 +2013,7 @@ export default function Home() {
         const empty = emptyWorkspace();
         setWorkspaces((prev) => [...prev, ws]);
         hydratedWorkspaceRef.current = ws.id;
-        setCampaignMediaMap({});
+        replaceCampaignMedia({});
         setActiveWorkspaceId(ws.id);
         setData(empty);
         setSelection(defaultSelection(empty));
@@ -1713,7 +2030,7 @@ export default function Home() {
 
   async function importLegacyWorkspaceNow() {
     if (!cloudEnabled || !supabase || !authUser) return;
-    const legacy = getLegacyWorkspaceForImport();
+    const legacy = await getLegacyWorkspaceForImport();
     if (!legacy || legacy.clients.length === 0) {
       markImportDone(authUser.id);
       setShowImportPrompt(false);
@@ -1775,7 +2092,7 @@ export default function Home() {
   async function signOut() {
     if (!supabase) return;
     await supabase.auth.signOut();
-    setCampaignMediaMap({});
+    replaceCampaignMedia({});
   }
 
   // ── Soft delete with undo ──────────────────────────────────────
@@ -3714,6 +4031,11 @@ export default function Home() {
     const campaign = selectedCampaign;
     const client = selectedClient;
     const isOverlayCampaign = false;
+    const storyOffsetKey = storyCtaOffsetKey(campaign.id);
+    const storyOffset = storyCtaOffsets[storyOffsetKey] ?? { x: 0, y: 0 };
+    const debugUpdatedLabel = localDebugStats
+      ? new Date(localDebugStats.generatedAtIso).toLocaleTimeString()
+      : "—";
 
     return (
       <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -3739,10 +4061,12 @@ export default function Home() {
                   mediaKind: "none",
                   mediaMimeType: "",
                 });
-                if (cloudEnabled) {
+                if (cloudEnabled && !activeWorkspaceIsLocal) {
                   void clearCampaignMediaInCloud(campaign.id).catch((error) => {
                     console.error("Failed to clear media", error);
                   });
+                } else {
+                  void deleteLocalMediaAsset(activeWorkspaceId, campaign.id);
                 }
               }}
             >
@@ -3911,6 +4235,17 @@ export default function Home() {
             />
             Transparent PNG
           </label>
+          <button
+            className={`btn btn-sm ${debugPanelOpen ? "btn-primary" : "btn-secondary"}`}
+            onClick={() => {
+              setDebugPanelOpen((open) => !open);
+              if (!debugPanelOpen) {
+                void refreshLocalDebugStats();
+              }
+            }}
+          >
+            {debugPanelOpen ? "Hide Debug" : "Debug"}
+          </button>
           <div className="zoom-controls">
             <button
               className="zoom-btn"
@@ -3935,6 +4270,70 @@ export default function Home() {
           onDrop={onPreviewDrop}
           onDragOver={onPreviewDragOver}
         >
+          {debugPanelOpen && (
+            <div className="local-debug-panel">
+              <div className="local-debug-panel-header">
+                <strong>Local Persistence</strong>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => void refreshLocalDebugStats()}
+                  disabled={debugPanelLoading}
+                >
+                  {debugPanelLoading ? "Refreshing..." : "Refresh"}
+                </button>
+              </div>
+              {debugPanelError && (
+                <div className="local-debug-panel-error">{debugPanelError}</div>
+              )}
+              {localDebugStats && (
+                <>
+                  <div className="local-debug-panel-meta">
+                    Updated {debugUpdatedLabel} · Local workspace `{localDebugStats.debugWorkspaceId}`
+                  </div>
+                  <div className="local-debug-grid">
+                    <div className="local-debug-row">
+                      <span>Active Workspace</span>
+                      <strong>{activeWorkspace.name} ({activeWorkspace.kind})</strong>
+                    </div>
+                    <div className="local-debug-row">
+                      <span>IndexedDB Snapshot</span>
+                      <strong>{localDebugStats.workspaceSnapshot.exists ? "Present" : "Missing"}</strong>
+                    </div>
+                    <div className="local-debug-row">
+                      <span>Clients / Projects / Ads</span>
+                      <strong>
+                        {localDebugStats.workspaceSnapshot.clients} / {localDebugStats.workspaceSnapshot.projects} / {localDebugStats.workspaceSnapshot.campaigns}
+                      </strong>
+                    </div>
+                    <div className="local-debug-row">
+                      <span>Snapshot Size</span>
+                      <strong>{formatBytes(localDebugStats.workspaceSnapshot.bytes)}</strong>
+                    </div>
+                    <div className="local-debug-row">
+                      <span>Stored Media</span>
+                      <strong>
+                        {localDebugStats.media.count} ({localDebugStats.media.images} img / {localDebugStats.media.videos} vid)
+                      </strong>
+                    </div>
+                    <div className="local-debug-row">
+                      <span>Media Size</span>
+                      <strong>{formatBytes(localDebugStats.media.bytes)}</strong>
+                    </div>
+                    <div className="local-debug-row">
+                      <span>UI localStorage</span>
+                      <strong>{formatBytes(localDebugStats.localStorage.uiBytes)}</strong>
+                    </div>
+                    <div className="local-debug-row">
+                      <span>Legacy Workspace Keys</span>
+                      <strong>
+                        {localDebugStats.localStorage.legacyWorkspaceKeys} · {formatBytes(localDebugStats.localStorage.legacyWorkspaceBytes)}
+                      </strong>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           {/* Feed view — routed by platform */}
             <div
               className="preview-scaled"
@@ -3964,6 +4363,20 @@ export default function Home() {
                   instagramFeedOverlayOffsetY={igFeedOverlayOffsetY}
                   mockupBackdropColor={mockupBackdropColor}
                   transparentPngExport={transparentPngExport}
+                  storyCtaOffsetX={storyOffset.x}
+                  storyCtaOffsetY={storyOffset.y}
+                  onStoryCtaOffsetChange={(offsetX, offsetY) => {
+                    setStoryCtaOffsets((prev) => {
+                      const existing = prev[storyOffsetKey];
+                      if (existing && existing.x === offsetX && existing.y === offsetY) {
+                        return prev;
+                      }
+                      return {
+                        ...prev,
+                        [storyOffsetKey]: { x: offsetX, y: offsetY },
+                      };
+                    });
+                  }}
                   onMediaChange={(m) => setCampaignMedia(campaign.id, m)}
                 />
               </div>
