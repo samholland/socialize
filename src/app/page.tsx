@@ -3322,16 +3322,16 @@ export default function Home() {
           {/* Ad Editor (only mode now — campaign settings live on project view) */}
             <div className="form-section">
               <div className="ad-brief-card">
-                <div className="ad-brief-label">Ad Brief</div>
+                <div className="ad-brief-label">Brief</div>
                 <p className="ad-brief-text">{adBrief}</p>
               </div>
               <div className="form-group">
-                <label className="form-label">Ad Name</label>
+                <label className="form-label">Name</label>
                 <input
                   className="form-input"
                   value={campaign.name}
                   onChange={(e) => updateCampaign({ name: e.target.value })}
-                  placeholder="Ad name"
+                  placeholder="Name"
                 />
               </div>
               <div className="form-row">
@@ -3356,7 +3356,7 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Ratio</label>
+                  <label className="form-label">Format</label>
                   {isStoryPlatform(campaign.platform) ? (
                     <input
                       className="form-input"
@@ -3383,7 +3383,7 @@ export default function Home() {
 
               {audienceOptions.length > 0 && (
                 <div className="form-group">
-                  <label className="form-label">Audience Profile</label>
+                  <label className="form-label">Audience</label>
                   <div className="form-select-wrap">
                     <select
                       className="form-select"
@@ -3448,7 +3448,7 @@ export default function Home() {
                   rows={6}
                   value={campaign.primaryText}
                   onChange={(e) => updateCampaign({ primaryText: e.target.value })}
-                  placeholder="Write your ad body copy here…"
+                  placeholder="Start writing…"
                 />
               </div>
 
@@ -3492,7 +3492,7 @@ export default function Home() {
               <div className="form-row">
                 <div className="form-group">
                   <label className="form-label">
-                    {isInstagramStory ? "CTA Text" : "CTA"}
+                    {isInstagramStory ? "Call to Action Text" : "Call to Action"}
                   </label>
                   {isInstagramStory ? (
                     <input
@@ -3518,7 +3518,7 @@ export default function Home() {
                   )}
                 </div>
                 <div className="form-group">
-                  <label className="form-label">CTA Color</label>
+                  <label className="form-label">Color</label>
                   <div className="color-row">
                     <label className="color-swatch" title="Pick color">
                       <input
