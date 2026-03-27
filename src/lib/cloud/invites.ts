@@ -1,5 +1,16 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+function normalizeSupabaseErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (error && typeof error === "object") {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim().length > 0) return message;
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === "string" && code.trim().length > 0) return `${fallback} (${code})`;
+  }
+  return fallback;
+}
+
 export type CloudWorkspaceInvite = {
   id: string;
   workspaceId: string;
@@ -43,7 +54,11 @@ export async function listWorkspaceInvites(
   const { data, error } = await supabase.rpc("list_workspace_invites", {
     p_workspace_id: workspaceId,
   });
-  if (error) throw error;
+  if (error) {
+    throw new Error(
+      normalizeSupabaseErrorMessage(error, "Unable to load workspace invites.")
+    );
+  }
   const rows = Array.isArray(data) ? data : [];
   return rows
     .map((row) => ({
@@ -74,7 +89,11 @@ export async function createWorkspaceInvite(
     p_role: role,
     p_expires_days: 30,
   });
-  if (error) throw error;
+  if (error) {
+    throw new Error(
+      normalizeSupabaseErrorMessage(error, "Unable to create workspace invite.")
+    );
+  }
   const row = Array.isArray(data) ? data[0] : null;
   if (!row || typeof row.id !== "string") {
     throw new Error("Failed to create workspace invite.");
@@ -99,7 +118,11 @@ export async function revokeWorkspaceInvite(
   const { data, error } = await supabase.rpc("revoke_workspace_invite", {
     p_invite_id: inviteId,
   });
-  if (error) throw error;
+  if (error) {
+    throw new Error(
+      normalizeSupabaseErrorMessage(error, "Unable to revoke workspace invite.")
+    );
+  }
   return data === true;
 }
 
@@ -107,7 +130,11 @@ export async function listMyPendingWorkspaceInvites(
   supabase: SupabaseClient
 ): Promise<CloudIncomingWorkspaceInvite[]> {
   const { data, error } = await supabase.rpc("list_my_pending_workspace_invites");
-  if (error) throw error;
+  if (error) {
+    throw new Error(
+      normalizeSupabaseErrorMessage(error, "Unable to load incoming invites.")
+    );
+  }
   const rows = Array.isArray(data) ? data : [];
   return rows
     .map((row) => ({
@@ -136,7 +163,11 @@ export async function acceptWorkspaceInvite(
   const { data, error } = await supabase.rpc("accept_workspace_invite", {
     p_invite_id: inviteId,
   });
-  if (error) throw error;
+  if (error) {
+    throw new Error(
+      normalizeSupabaseErrorMessage(error, "Unable to accept workspace invite.")
+    );
+  }
   const row = Array.isArray(data) ? data[0] : null;
   if (!row || typeof row.workspace_id !== "string" || typeof row.organization_id !== "string") {
     throw new Error("Failed to accept invite.");

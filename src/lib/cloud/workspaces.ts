@@ -50,6 +50,17 @@ export type CloudClient = {
 
 export type CloudAppData = { clients: CloudClient[] };
 
+function normalizeSupabaseErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (error && typeof error === "object") {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim().length > 0) return message;
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === "string" && code.trim().length > 0) return `${fallback} (${code})`;
+  }
+  return fallback;
+}
+
 export async function ensureProfileAndPersonalWorkspace(
   supabase: SupabaseClient,
   user: User
@@ -151,7 +162,14 @@ export async function createOrganizationWorkspace(
     p_workspace_id: workspaceId,
     p_workspace_name: workspaceName,
   });
-  if (error) throw error;
+  if (error) {
+    throw new Error(
+      normalizeSupabaseErrorMessage(
+        error,
+        "Unable to create organization workspace."
+      )
+    );
+  }
 
   const row = Array.isArray(data) ? data[0] : null;
   if (!row || typeof row.id !== "string" || typeof row.name !== "string") {
@@ -162,6 +180,34 @@ export async function createOrganizationWorkspace(
     id: row.id,
     name: row.name,
     kind: "organization",
+  };
+}
+
+export async function convertWorkspaceToOrganization(
+  supabase: SupabaseClient,
+  workspaceId: string
+): Promise<CloudWorkspace> {
+  const { data, error } = await supabase.rpc("convert_workspace_to_organization", {
+    p_workspace_id: workspaceId,
+  });
+  if (error) {
+    throw new Error(
+      normalizeSupabaseErrorMessage(
+        error,
+        "Unable to convert workspace to organization."
+      )
+    );
+  }
+
+  const row = Array.isArray(data) ? data[0] : null;
+  if (!row || typeof row.id !== "string" || typeof row.name !== "string") {
+    throw new Error("Failed to convert workspace.");
+  }
+
+  return {
+    id: row.id,
+    name: row.name,
+    kind: row.kind === "organization" ? "organization" : "personal",
   };
 }
 

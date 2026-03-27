@@ -118,7 +118,7 @@ begin
 
   insert into public.organizations (owner_user_id, name)
   values (v_user_id, v_workspace_name)
-  returning id into v_org_id;
+  returning organizations.id into v_org_id;
 
   insert into public.organization_memberships (organization_id, user_id, role)
   values (v_org_id, v_user_id, 'owner')

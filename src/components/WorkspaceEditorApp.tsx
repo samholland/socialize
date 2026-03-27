@@ -19,6 +19,7 @@ import {
 import { getBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import {
+  convertWorkspaceToOrganization,
   createOrganizationWorkspace,
   ensureProfileAndPersonalWorkspace,
   listAccessibleWorkspaces,
@@ -1559,6 +1560,8 @@ export default function WorkspaceEditorApp() {
   >({});
   const [workspaceInvitesLoading, setWorkspaceInvitesLoading] = useState(false);
   const [workspaceInvitesSaving, setWorkspaceInvitesSaving] = useState(false);
+  const [workspaceInviteUpgradeLoading, setWorkspaceInviteUpgradeLoading] =
+    useState(false);
   const [workspaceInvitesError, setWorkspaceInvitesError] = useState<string | null>(null);
   const [incomingWorkspaceInvites, setIncomingWorkspaceInvites] = useState<
     CloudIncomingWorkspaceInvite[]
@@ -1785,7 +1788,7 @@ export default function WorkspaceEditorApp() {
       const invites = await listMyPendingWorkspaceInvites(supabase);
       setIncomingWorkspaceInvites(invites);
     } catch (error) {
-      console.error("Failed to load incoming workspace invites", error);
+      console.warn("Failed to load incoming workspace invites", error);
       const message =
         error instanceof Error ? error.message : "Unable to load incoming invites.";
       setIncomingWorkspaceInvitesError(message);
@@ -1808,7 +1811,7 @@ export default function WorkspaceEditorApp() {
       const invites = await listWorkspaceInvites(supabase, workspaceId);
       setWorkspaceInvitesByWorkspace((prev) => ({ ...prev, [workspaceId]: invites }));
     } catch (error) {
-      console.error("Failed to load workspace invites", error);
+      console.warn("Failed to load workspace invites", error);
       if (isActive) {
         const message =
           error instanceof Error ? error.message : "Unable to load workspace invites.";
@@ -1837,6 +1840,41 @@ export default function WorkspaceEditorApp() {
     return resolved;
   }
 
+  async function enableActiveWorkspaceCollaboration() {
+    if (activeWorkspace.kind !== "personal") return;
+    if (!cloudEnabled || !supabase || !authUser) return;
+    setWorkspaceInviteUpgradeLoading(true);
+    setWorkspaceInvitesError(null);
+    try {
+      await convertWorkspaceToOrganization(supabase, activeWorkspaceId);
+      const nextWorkspaces = await refreshCloudWorkspaceList();
+      const nextWorkspace = nextWorkspaces.find(
+        (workspace) => workspace.id === activeWorkspaceId
+      );
+      if (!nextWorkspace || nextWorkspace.kind !== "organization") {
+        throw new Error("Workspace conversion did not complete.");
+      }
+      await refreshWorkspaceInviteList(activeWorkspaceId);
+    } catch (error) {
+      console.warn("Failed to enable workspace collaboration", error);
+      let message =
+        error instanceof Error
+          ? error.message
+          : "Unable to enable collaboration for this workspace.";
+      if (
+        typeof message === "string" &&
+        message.toLowerCase().includes("convert_workspace_to_organization")
+      ) {
+        message =
+          "Workspace conversion RPC is missing. Run migration 20260327_convert_workspace_to_org.sql and refresh.";
+      }
+      setWorkspaceInvitesError(message);
+      alert(message);
+    } finally {
+      setWorkspaceInviteUpgradeLoading(false);
+    }
+  }
+
   async function addWorkspaceInvite() {
     if (activeWorkspace.kind !== "organization") return;
     if (!cloudEnabled || !supabase || !authUser) return;
@@ -1861,7 +1899,7 @@ export default function WorkspaceEditorApp() {
         refreshIncomingWorkspaceInviteList(),
       ]);
     } catch (error) {
-      console.error("Failed to create workspace invite", error);
+      console.warn("Failed to create workspace invite", error);
       const message =
         error instanceof Error ? error.message : "Unable to create workspace invite.";
       setWorkspaceInvitesError(message);
@@ -1883,7 +1921,7 @@ export default function WorkspaceEditorApp() {
         refreshIncomingWorkspaceInviteList(),
       ]);
     } catch (error) {
-      console.error("Failed to revoke workspace invite", error);
+      console.warn("Failed to revoke workspace invite", error);
       const message =
         error instanceof Error ? error.message : "Unable to revoke workspace invite.";
       setWorkspaceInvitesError(message);
@@ -1926,7 +1964,7 @@ export default function WorkspaceEditorApp() {
         refreshWorkspaceInviteList(accepted.workspaceId),
       ]);
     } catch (error) {
-      console.error("Failed to accept workspace invite", error);
+      console.warn("Failed to accept workspace invite", error);
       const message =
         error instanceof Error ? error.message : "Unable to accept workspace invite.";
       setIncomingWorkspaceInvitesError(message);
@@ -5890,10 +5928,29 @@ export default function WorkspaceEditorApp() {
                   Workspace Access
                 </div>
                 {activeWorkspace.kind !== "organization" ? (
-                  <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                    Personal cloud workspaces are private. Create a new shared workspace
-                    to invite collaborators.
-                  </div>
+                  <>
+                    <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                      This workspace is currently private. Enable collaboration to turn it
+                      into a shared workspace with invites.
+                    </div>
+                    <div>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        type="button"
+                        onClick={() => void enableActiveWorkspaceCollaboration()}
+                        disabled={workspaceInviteUpgradeLoading}
+                      >
+                        {workspaceInviteUpgradeLoading
+                          ? "Enabling..."
+                          : "Enable Collaboration"}
+                      </button>
+                    </div>
+                    {workspaceInvitesError && (
+                      <div style={{ fontSize: 12, color: "var(--danger)" }}>
+                        {workspaceInvitesError}
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <>
                     <div style={{ fontSize: 12, color: "var(--muted)" }}>
