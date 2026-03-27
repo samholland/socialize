@@ -23,6 +23,8 @@ type DrawStoryLikeSurfaceArgs = {
   ctaTextColor: string;
   ctaOffsetX?: number;
   ctaOffsetY?: number;
+  engagementPreset?: "low" | "medium" | "high";
+  engagementSeed?: number;
   clientName: string;
   clientAvatarUrl?: string;
   media: PreviewMedia;
@@ -44,6 +46,8 @@ export async function drawStoryLikeSurface({
   ctaTextColor,
   ctaOffsetX = 0,
   ctaOffsetY = 0,
+  engagementPreset = "medium",
+  engagementSeed = 1,
   clientName,
   clientAvatarUrl,
   media,
@@ -65,6 +69,8 @@ export async function drawStoryLikeSurface({
     ctaTextColor,
     ctaOffsetX,
     ctaOffsetY,
+    engagementPreset,
+    engagementSeed,
     media: toStoryExportMedia(media),
   });
 

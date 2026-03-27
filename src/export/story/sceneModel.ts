@@ -39,6 +39,11 @@ type StorySceneTextLayer = {
   cta: StorySceneCta;
 };
 
+type StorySceneEngagement = {
+  preset: "low" | "medium" | "high";
+  seed: number;
+};
+
 type StorySceneMediaNone = {
   kind: "none";
 };
@@ -70,6 +75,7 @@ export type StorySceneModel = {
   timing: StorySceneTiming;
   identity: StorySceneIdentity;
   textLayer: StorySceneTextLayer;
+  engagement: StorySceneEngagement;
   media: StorySceneMedia;
 };
 
@@ -133,6 +139,18 @@ export function buildStorySceneModel(scene: StoryExportScene): StorySceneModel {
             ? scene.ctaOffsetY
             : 0,
       },
+    },
+    engagement: {
+      preset:
+        scene.engagementPreset === "low" ||
+        scene.engagementPreset === "medium" ||
+        scene.engagementPreset === "high"
+          ? scene.engagementPreset
+          : "medium",
+      seed:
+        typeof scene.engagementSeed === "number" && Number.isFinite(scene.engagementSeed)
+          ? Math.max(1, Math.floor(scene.engagementSeed))
+          : 1,
     },
     media: buildStorySceneMedia(scene),
   };

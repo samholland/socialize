@@ -3938,6 +3938,7 @@ export default function WorkspaceEditorApp() {
     const campaign = selectedCampaign;
     const project = selectedProject;
     const isInstagramFeed = campaign.platform === "Instagram Feed";
+    const isInstagramReels = campaign.platform === "Instagram Reels";
     const isInstagramStory = campaign.platform === "Instagram Story";
     const isFacebookFeed = campaign.platform === "Facebook Feed";
     const ctaColorDraft = ctaColorDrafts[campaign.id] ?? campaign.ctaBgColor;
@@ -4031,7 +4032,7 @@ export default function WorkspaceEditorApp() {
                 </div>
               </div>
 
-              {(isInstagramFeed || isFacebookFeed) && (
+              {(isInstagramFeed || isFacebookFeed || isInstagramReels) && (
                 <div className="form-group">
                   <label className="form-label">Engagement</label>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

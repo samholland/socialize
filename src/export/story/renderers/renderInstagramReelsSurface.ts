@@ -90,6 +90,64 @@ function drawMoreIcon(
   }
 }
 
+function mulberry32(seed: number) {
+  let t = seed >>> 0;
+  return () => {
+    t += 0x6d2b79f5;
+    let r = Math.imul(t ^ (t >>> 15), t | 1);
+    r ^= r + Math.imul(r ^ (r >>> 7), r | 61);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function randomInt(rng: () => number, min: number, max: number): number {
+  const lo = Math.floor(min);
+  const hi = Math.floor(max);
+  if (hi <= lo) return lo;
+  return lo + Math.floor(rng() * (hi - lo + 1));
+}
+
+function formatCompactCount(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
+  return `${value}`;
+}
+
+function reelsEngagementCounts(
+  preset: "low" | "medium" | "high",
+  seed: number
+): { likes: string; comments: string; reposts: string; sends: string } {
+  const rng = mulberry32((seed ^ 0x85ebca6b) >>> 0 || 1);
+  const ranges =
+    preset === "high"
+      ? {
+          likes: [25_000, 650_000],
+          comments: [500, 25_000],
+          reposts: [200, 11_000],
+          sends: [700, 45_000],
+        }
+      : preset === "low"
+        ? {
+            likes: [120, 6_500],
+            comments: [8, 650],
+            reposts: [3, 220],
+            sends: [15, 1_200],
+          }
+        : {
+            likes: [6_500, 120_000],
+            comments: [90, 7_500],
+            reposts: [35, 1_800],
+            sends: [120, 8_500],
+          };
+
+  return {
+    likes: formatCompactCount(randomInt(rng, ranges.likes[0], ranges.likes[1])),
+    comments: formatCompactCount(randomInt(rng, ranges.comments[0], ranges.comments[1])),
+    reposts: formatCompactCount(randomInt(rng, ranges.reposts[0], ranges.reposts[1])),
+    sends: formatCompactCount(randomInt(rng, ranges.sends[0], ranges.sends[1])),
+  };
+}
+
 function drawReelsHeader(
   ctx: CanvasRenderingContext2D,
   layout: Layout,
@@ -149,6 +207,7 @@ function drawReelsHeader(
 function drawReelsActionRail(
   ctx: CanvasRenderingContext2D,
   layout: Layout,
+  scene: StorySceneModel,
   assets: StoryExportAssets,
   helpers: ReelsRenderHelpers
 ) {
@@ -158,11 +217,12 @@ function drawReelsActionRail(
   const iconSize = 32 * s;
   const itemStep = 67 * s;
 
+  const counts = reelsEngagementCounts(scene.engagement.preset, scene.engagement.seed);
   const entries: Array<{ icon: HTMLImageElement | null | undefined; count: string }> = [
-    { icon: assets.heartIcon, count: "14.5K" },
-    { icon: assets.commentIcon, count: "94" },
-    { icon: assets.repostIcon, count: "169" },
-    { icon: assets.sendIcon, count: "8,576" },
+    { icon: assets.heartIcon, count: counts.likes },
+    { icon: assets.commentIcon, count: counts.comments },
+    { icon: assets.repostIcon, count: counts.reposts },
+    { icon: assets.sendIcon, count: counts.sends },
   ];
 
   entries.forEach((entry, index) => {
@@ -344,6 +404,6 @@ export function renderInstagramReelsSurface({
   ctx.fillRect(layout.screen.x, layout.screen.y, layout.screen.w, 160 * layout.scale);
 
   drawReelsHeader(ctx, layout, helpers);
-  drawReelsActionRail(ctx, layout, assets, helpers);
+  drawReelsActionRail(ctx, layout, scene, assets, helpers);
   drawReelsFooter(ctx, scene, layout, assets, helpers);
 }

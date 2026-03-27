@@ -363,6 +363,8 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
         ctaTextColor: resolvedCtaTextColor,
         ctaOffsetX: storyCtaOffsetX,
         ctaOffsetY: storyCtaOffsetY,
+        engagementPreset,
+        engagementSeed,
         clientName,
         clientAvatarUrl,
         media,

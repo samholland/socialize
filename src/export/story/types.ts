@@ -11,6 +11,8 @@ export type StoryExportScene = {
   ctaTextColor: string;
   ctaOffsetX?: number;
   ctaOffsetY?: number;
+  engagementPreset?: "low" | "medium" | "high";
+  engagementSeed?: number;
   media: { kind: "image"; url: string } | { kind: "video"; url: string } | { kind: "none" };
 };
 
