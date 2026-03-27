@@ -54,6 +54,7 @@ type Props = {
   storyCtaOffsetY?: number;
   onStoryCtaOffsetChange?: (offsetX: number, offsetY: number) => void;
   onMediaChange: (media: PreviewMedia) => void;
+  onMediaFileSelected?: (file: File) => void;
 };
 
 const VIDEO_EXPORT = {
@@ -220,6 +221,7 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     storyCtaOffsetY = 0,
     onStoryCtaOffsetChange,
     onMediaChange,
+    onMediaFileSelected,
   }: Props,
   ref
 ) {
@@ -639,11 +641,20 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     URL.revokeObjectURL(url);
   }
 
+  function dispatchSelectedFile(file: File) {
+    if (onMediaFileSelected) {
+      onMediaFileSelected(file);
+      return;
+    }
+    setFromFile(file);
+  }
+
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
+    e.stopPropagation();
     setIsDragging(false);
     const file = e.dataTransfer.files?.[0];
-    if (file) setFromFile(file);
+    if (file) dispatchSelectedFile(file);
   }
 
   function onDragOver(e: React.DragEvent) {
@@ -662,7 +673,8 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
 
   function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (file) setFromFile(file);
+    if (file) dispatchSelectedFile(file);
+    e.target.value = "";
   }
 
   function handleCanvasClick() {

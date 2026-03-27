@@ -4553,6 +4553,9 @@ export default function WorkspaceEditorApp() {
                       };
                     });
                   }}
+                  onMediaFileSelected={(file) => {
+                    void setMediaFromFile(campaign.id, file);
+                  }}
                   onMediaChange={(m) => setCampaignMedia(campaign.id, m)}
                 />
               </div>
