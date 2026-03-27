@@ -1,5 +1,5 @@
 const DB_NAME = "socialize.local.db";
-const DB_VERSION = 2;
+const DB_VERSION = 4;
 const WORKSPACE_STORE = "workspace_states";
 const MEDIA_STORE = "media_assets";
 
@@ -55,7 +55,7 @@ function ensureMediaStoreSchema(
     const store = db.createObjectStore(MEDIA_STORE, { keyPath: "id" });
     store.createIndex("workspaceId", "workspaceId", { unique: false });
     store.createIndex("storagePath", ["workspaceId", "storagePath"], {
-      unique: true,
+      unique: false,
     });
     store.createIndex("campaignId", ["workspaceId", "campaignId"], {
       unique: false,
@@ -67,16 +67,45 @@ function ensureMediaStoreSchema(
   if (!store.indexNames.contains("workspaceId")) {
     store.createIndex("workspaceId", "workspaceId", { unique: false });
   }
-  if (!store.indexNames.contains("storagePath")) {
+  if (store.indexNames.contains("storagePath")) {
+    const existing = store.index("storagePath");
+    const keyPath = Array.isArray(existing.keyPath) ? existing.keyPath : [];
+    const requiresRecreate =
+      existing.unique || keyPath[0] !== "workspaceId" || keyPath[1] !== "storagePath";
+    if (requiresRecreate) {
+      store.deleteIndex("storagePath");
+      store.createIndex("storagePath", ["workspaceId", "storagePath"], {
+        unique: false,
+      });
+    }
+  } else {
     store.createIndex("storagePath", ["workspaceId", "storagePath"], {
-      unique: true,
+      unique: false,
     });
   }
-  if (!store.indexNames.contains("campaignId")) {
+  if (store.indexNames.contains("campaignId")) {
+    const existing = store.index("campaignId");
+    const keyPath = Array.isArray(existing.keyPath) ? existing.keyPath : [];
+    const requiresRecreate =
+      existing.unique || keyPath[0] !== "workspaceId" || keyPath[1] !== "campaignId";
+    if (requiresRecreate) {
+      store.deleteIndex("campaignId");
+      store.createIndex("campaignId", ["workspaceId", "campaignId"], {
+        unique: false,
+      });
+    }
+  } else {
     store.createIndex("campaignId", ["workspaceId", "campaignId"], {
       unique: false,
     });
   }
+}
+
+function attachDbLifecycleHandlers(db: IDBDatabase) {
+  db.onversionchange = () => {
+    db.close();
+    dbPromise = null;
+  };
 }
 
 function openDb(): Promise<IDBDatabase> {
@@ -86,6 +115,20 @@ function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
 
   dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
+    let settled = false;
+    const resolveOnce = (db: IDBDatabase) => {
+      if (settled) return;
+      settled = true;
+      attachDbLifecycleHandlers(db);
+      resolve(db);
+    };
+    const rejectOnce = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      dbPromise = null;
+      reject(error);
+    };
+
     const request = window.indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
@@ -95,9 +138,26 @@ function openDb(): Promise<IDBDatabase> {
       }
       ensureMediaStoreSchema(db, tx);
     };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () =>
-      reject(request.error ?? new Error("Unable to open IndexedDB database."));
+    request.onsuccess = () => {
+      resolveOnce(request.result);
+    };
+    request.onerror = () => {
+      rejectOnce(request.error ?? new Error("Unable to open IndexedDB database."));
+    };
+    request.onblocked = () => {
+      // If an upgrade is blocked (another tab/session), fall back to opening the
+      // current DB version so reads/writes can continue instead of returning [].
+      const fallbackRequest = window.indexedDB.open(DB_NAME);
+      fallbackRequest.onsuccess = () => {
+        resolveOnce(fallbackRequest.result);
+      };
+      fallbackRequest.onerror = () => {
+        rejectOnce(
+          fallbackRequest.error ??
+            new Error("IndexedDB upgrade is blocked by another open tab.")
+        );
+      };
+    };
   });
 
   return dbPromise;
@@ -166,7 +226,8 @@ export async function setLocalWorkspaceState<T>(
     } satisfies WorkspaceStateRecord);
     await transactionDone(transaction);
     return true;
-  } catch {
+  } catch (error) {
+    console.warn("IndexedDB: failed to write workspace snapshot.", error);
     return false;
   }
 }
@@ -175,6 +236,7 @@ export async function putLocalMediaAsset(
   workspaceId: string,
   storagePath: string,
   media: {
+    campaignId?: string;
     kind: "image" | "video";
     blob: Blob;
     mimeType: string;
@@ -190,6 +252,7 @@ export async function putLocalMediaAsset(
       id: mediaId(workspaceId, storagePath),
       workspaceId,
       storagePath,
+      campaignId: media.campaignId,
       kind: media.kind,
       blob: media.blob,
       mimeType: media.mimeType,
@@ -198,7 +261,8 @@ export async function putLocalMediaAsset(
     } satisfies MediaAssetRecord);
     await transactionDone(transaction);
     return true;
-  } catch {
+  } catch (error) {
+    console.warn("IndexedDB: failed to persist media asset.", error);
     return false;
   }
 }
@@ -211,10 +275,14 @@ export async function listLocalMediaAssetsForWorkspace(
     const db = await openDb();
     const transaction = db.transaction(MEDIA_STORE, "readonly");
     const store = transaction.objectStore(MEDIA_STORE);
-    const index = store.index("workspaceId");
-    const records = (await requestToPromise(
-      index.getAll(IDBKeyRange.only(workspaceId))
-    )) as MediaAssetRecord[];
+    const records = (store.indexNames.contains("workspaceId")
+      ? await requestToPromise(store.index("workspaceId").getAll(IDBKeyRange.only(workspaceId)))
+      : (await requestToPromise(store.getAll())).filter(
+          (record) =>
+            typeof record === "object" &&
+            record !== null &&
+            (record as { workspaceId?: string }).workspaceId === workspaceId
+        )) as MediaAssetRecord[];
     await transactionDone(transaction);
     return records.map((record) => ({
       workspaceId: record.workspaceId,
@@ -226,7 +294,8 @@ export async function listLocalMediaAssetsForWorkspace(
       fileName: record.fileName,
       updatedAt: record.updatedAt,
     }));
-  } catch {
+  } catch (error) {
+    console.warn("IndexedDB: failed to list media assets.", error);
     return [];
   }
 }

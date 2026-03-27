@@ -26,8 +26,6 @@ import {
   type CloudAppData,
 } from "@/lib/cloud/workspaces";
 import {
-  deleteLegacyLocalMediaAssets,
-  deleteLocalMediaAssets,
   getLocalWorkspaceState,
   listLocalMediaAssetsForWorkspace,
   listLocalWorkspaceStates,
@@ -375,6 +373,14 @@ function normalizeCampaign(c: Campaign): Campaign {
     (c as { ctaBgColor?: string }).ctaBgColor,
     DEFAULT_CTA_BG
   );
+  const mediaMimeType =
+    typeof (c as { mediaMimeType?: unknown }).mediaMimeType === "string"
+      ? ((c as { mediaMimeType?: string }).mediaMimeType ?? "")
+      : "";
+  const mediaKind = inferMediaKind(
+    (c as { mediaKind?: "none" | "image" | "video" }).mediaKind,
+    mediaMimeType
+  );
   return {
     ...c,
     platform,
@@ -413,15 +419,8 @@ function normalizeCampaign(c: Campaign): Campaign {
       typeof (c as { mediaStoragePath?: unknown }).mediaStoragePath === "string"
         ? ((c as { mediaStoragePath?: string }).mediaStoragePath ?? "")
         : "",
-    mediaKind:
-      (c as { mediaKind?: unknown }).mediaKind === "image" ||
-      (c as { mediaKind?: unknown }).mediaKind === "video"
-        ? ((c as { mediaKind?: "none" | "image" | "video" }).mediaKind ?? "none")
-        : "none",
-    mediaMimeType:
-      typeof (c as { mediaMimeType?: unknown }).mediaMimeType === "string"
-        ? ((c as { mediaMimeType?: string }).mediaMimeType ?? "")
-        : "",
+    mediaKind: mediaKind ?? "none",
+    mediaMimeType,
     ctaBgColor,
     ctaTextColor: contrastText(ctaBgColor),
   };
@@ -487,6 +486,18 @@ function defaultSelection(data: AppData): Selection {
 
 function isLocalMediaStoragePath(path: string | undefined): path is string {
   return typeof path === "string" && path.startsWith(LOCAL_MEDIA_PATH_PREFIX);
+}
+
+function inferMediaKind(
+  kind: Campaign["mediaKind"],
+  mimeType?: string
+): "image" | "video" | null {
+  if (kind === "image" || kind === "video") return kind;
+  if (typeof mimeType === "string") {
+    if (mimeType.startsWith("video/")) return "video";
+    if (mimeType.startsWith("image/")) return "image";
+  }
+  return null;
 }
 
 async function sha256Hex(blob: Blob): Promise<string> {
@@ -1180,6 +1191,15 @@ export default function WorkspaceEditorApp() {
     setStoryCtaOffsets(ui.storyCtaOffsets);
   }, []);
 
+  useEffect(() => {
+    if (typeof navigator === "undefined") return;
+    if (!("storage" in navigator)) return;
+    if (typeof navigator.storage.persist !== "function") return;
+    void navigator.storage.persist().catch(() => {
+      // noop
+    });
+  }, []);
+
   // Local-only bootstrap
   useEffect(() => {
     if (cloudEnabled) return;
@@ -1199,8 +1219,7 @@ export default function WorkspaceEditorApp() {
     return () => {
       cancelled = true;
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cloudEnabled]);
+  }, [cloudEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Supabase auth bootstrap
   useEffect(() => {
@@ -1326,8 +1345,7 @@ export default function WorkspaceEditorApp() {
     return () => {
       cancelled = true;
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authReady, authUser, cloudEnabled, supabase]);
+  }, [authReady, authUser, cloudEnabled, supabase]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Export panel
   const [exportPanelOpen, setExportPanelOpen] = useState(false);
@@ -1528,47 +1546,37 @@ export default function WorkspaceEditorApp() {
     activeWorkspaceId,
   ]);
 
+  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     if (!storageReady) return;
-    if (!activeWorkspaceIsLocal) return;
-    void (async () => {
-      const assets = await listLocalMediaAssetsForWorkspace(activeWorkspaceId);
-      if (assets.length === 0) return;
-      const campaigns = data.clients.flatMap((client) =>
-        client.projects.flatMap((project) => project.campaigns)
-      );
-      const referencedPaths = new Set<string>();
-      const campaignById = new Map(campaigns.map((campaign) => [campaign.id, campaign]));
-      for (const campaign of campaigns) {
-        if (!isLocalMediaStoragePath(campaign.mediaStoragePath)) continue;
-        referencedPaths.add(campaign.mediaStoragePath);
-      }
+    const refs = collectRenderableMediaRefs(data);
+    if (refs.length === 0) return;
 
-      const orphanedPaths: string[] = [];
-      const orphanedLegacyCampaignIds: string[] = [];
-      for (const asset of assets) {
-        if (asset.storagePath) {
-          if (!referencedPaths.has(asset.storagePath)) {
-            orphanedPaths.push(asset.storagePath);
-          }
-          continue;
-        }
-        if (asset.campaignId) {
-          const campaign = campaignById.get(asset.campaignId);
-          if (!campaign || isLocalMediaStoragePath(campaign.mediaStoragePath)) {
-            orphanedLegacyCampaignIds.push(asset.campaignId);
-          }
-        }
-      }
+    const missingMedia = refs.some((ref) => {
+      const media = campaignMedia[ref.campaignId];
+      return !media || media.kind === "none";
+    });
+    if (!missingMedia) return;
 
-      if (orphanedPaths.length > 0) {
-        void deleteLocalMediaAssets(activeWorkspaceId, orphanedPaths);
-      }
-      if (orphanedLegacyCampaignIds.length > 0) {
-        void deleteLegacyLocalMediaAssets(activeWorkspaceId, orphanedLegacyCampaignIds);
-      }
-    })();
-  }, [storageReady, activeWorkspaceIsLocal, activeWorkspaceId, data]);
+    if (!cloudEnabled || activeWorkspaceIsLocal) {
+      void hydrateLocalMediaForWorkspace(activeWorkspaceId, data).catch((error) => {
+        console.error("Failed to rehydrate local media", error);
+      });
+      return;
+    }
+
+    void hydrateSignedMediaForWorkspace(activeWorkspaceId, data).catch((error) => {
+      console.error("Failed to rehydrate signed media", error);
+    });
+  }, [
+    storageReady,
+    cloudEnabled,
+    activeWorkspaceIsLocal,
+    activeWorkspaceId,
+    data,
+    campaignMedia,
+  ]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   useEffect(() => {
     return () => {
@@ -1721,13 +1729,26 @@ export default function WorkspaceEditorApp() {
     );
   }
 
-  function collectReferencedLocalMediaPaths(nextData: AppData): Set<string> {
-    const paths = new Set<string>();
+  function collectRenderableMediaRefs(nextData: AppData): Array<{
+    campaignId: string;
+    kind: "image" | "video" | null;
+    path: string;
+  }> {
+    const refs: Array<{
+      campaignId: string;
+      kind: "image" | "video" | null;
+      path: string;
+    }> = [];
     for (const campaign of collectCampaigns(nextData)) {
-      if (!isLocalMediaStoragePath(campaign.mediaStoragePath)) continue;
-      paths.add(campaign.mediaStoragePath);
+      if (!campaign.mediaStoragePath) continue;
+      const kind = inferMediaKind(campaign.mediaKind, campaign.mediaMimeType);
+      refs.push({
+        campaignId: campaign.id,
+        kind,
+        path: campaign.mediaStoragePath,
+      });
     }
-    return paths;
+    return refs;
   }
 
   async function hydrateLocalMediaForWorkspace(
@@ -1741,27 +1762,19 @@ export default function WorkspaceEditorApp() {
       return;
     }
 
-    const campaignById = new Map(campaigns.map((campaign) => [campaign.id, campaign]));
-    const referencedLocalPaths = collectReferencedLocalMediaPaths(nextData);
-    const orphanedStoragePaths: string[] = [];
-    const orphanedLegacyCampaignIds: string[] = [];
     const assetsByPath = new Map<string, (typeof assets)[number]>();
     const assetsByCampaignId = new Map<string, (typeof assets)[number]>();
 
     for (const asset of assets) {
       if (asset.storagePath) {
         assetsByPath.set(asset.storagePath, asset);
-        if (!referencedLocalPaths.has(asset.storagePath)) {
-          orphanedStoragePaths.push(asset.storagePath);
+        if (asset.campaignId) {
+          assetsByCampaignId.set(asset.campaignId, asset);
         }
         continue;
       }
       if (asset.campaignId) {
         assetsByCampaignId.set(asset.campaignId, asset);
-        const campaign = campaignById.get(asset.campaignId);
-        if (!campaign || isLocalMediaStoragePath(campaign.mediaStoragePath)) {
-          orphanedLegacyCampaignIds.push(asset.campaignId);
-        }
       }
     }
 
@@ -1793,13 +1806,6 @@ export default function WorkspaceEditorApp() {
         url: URL.createObjectURL(legacyAsset.blob),
       };
     }
-
-    if (orphanedStoragePaths.length > 0) {
-      void deleteLocalMediaAssets(workspaceId, orphanedStoragePaths);
-    }
-    if (orphanedLegacyCampaignIds.length > 0) {
-      void deleteLegacyLocalMediaAssets(workspaceId, orphanedLegacyCampaignIds);
-    }
     replaceCampaignMedia(nextCampaignMedia);
   }
 
@@ -1807,14 +1813,14 @@ export default function WorkspaceEditorApp() {
     workspaceId: string,
     nextData: AppData
   ) {
-    if (!cloudEnabled || !session?.access_token) return;
-    const campaigns = nextData.clients.flatMap((client) =>
-      client.projects.flatMap((project) => project.campaigns)
-    );
+    if (!cloudEnabled) return;
+    const accessToken = await getSessionAccessToken();
+    if (!accessToken) return;
+    const campaigns = collectCampaigns(nextData);
     const byCampaign = new Map<string, { path: string; kind: "image" | "video" }>();
     for (const campaign of campaigns) {
       if (!campaign.mediaStoragePath) continue;
-      const kind = campaign.mediaKind === "video" ? "video" : campaign.mediaKind === "image" ? "image" : null;
+      const kind = inferMediaKind(campaign.mediaKind, campaign.mediaMimeType);
       if (!kind) continue;
       byCampaign.set(campaign.id, { path: campaign.mediaStoragePath, kind });
     }
@@ -1828,7 +1834,7 @@ export default function WorkspaceEditorApp() {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${session.access_token}`,
+        authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
         workspaceId,
@@ -1847,6 +1853,17 @@ export default function WorkspaceEditorApp() {
       nextCampaignMedia[campaignId] = { kind: value.kind, url: signed };
     });
     replaceCampaignMedia(nextCampaignMedia);
+  }
+
+  async function getSessionAccessToken(): Promise<string | null> {
+    if (session?.access_token) return session.access_token;
+    if (!supabase) return null;
+    try {
+      const { data } = await supabase.auth.getSession();
+      return data.session?.access_token ?? null;
+    } catch {
+      return null;
+    }
   }
 
   function setCampaignMedia(campaignId: string, media: PreviewMedia) {
@@ -1875,7 +1892,11 @@ export default function WorkspaceEditorApp() {
     campaignId: string,
     file: File
   ): Promise<{ kind: "image" | "video"; url: string; storagePath: string }> {
-    if (!supabase || !session?.access_token) {
+    if (!supabase) {
+      throw new Error("You must be signed in to upload media.");
+    }
+    const accessToken = await getSessionAccessToken();
+    if (!accessToken) {
       throw new Error("You must be signed in to upload media.");
     }
     const mediaKind: "image" | "video" = file.type.startsWith("video/") ? "video" : "image";
@@ -1884,7 +1905,7 @@ export default function WorkspaceEditorApp() {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${session.access_token}`,
+        authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
         workspaceId: activeWorkspaceId,
@@ -1911,7 +1932,7 @@ export default function WorkspaceEditorApp() {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${session.access_token}`,
+        authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
         workspaceId: activeWorkspaceId,
@@ -1930,7 +1951,7 @@ export default function WorkspaceEditorApp() {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${session.access_token}`,
+        authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
         workspaceId: activeWorkspaceId,
@@ -1949,12 +1970,14 @@ export default function WorkspaceEditorApp() {
   }
 
   async function clearCampaignMediaInCloud(campaignId: string): Promise<void> {
-    if (!supabase || !session?.access_token) return;
+    if (!supabase) return;
+    const accessToken = await getSessionAccessToken();
+    if (!accessToken) return;
     const response = await fetch("/api/media/remove", {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${session.access_token}`,
+        authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
         workspaceId: activeWorkspaceId,
@@ -2006,6 +2029,7 @@ export default function WorkspaceEditorApp() {
     const mediaKind: "image" | "video" = file.type.startsWith("video/") ? "video" : "image";
     const storagePath = await localMediaStoragePathForFile(file);
     const persisted = await putLocalMediaAsset(activeWorkspaceId, storagePath, {
+      campaignId,
       kind: mediaKind,
       blob: file,
       mimeType: file.type,
@@ -2015,8 +2039,8 @@ export default function WorkspaceEditorApp() {
       console.warn("Failed to persist local media in IndexedDB.");
     }
     setCampaignMedia(campaignId, { kind: mediaKind, url });
-    setData((prev) => ({
-      clients: prev.clients.map((client) => ({
+    const nextData: AppData = {
+      clients: data.clients.map((client) => ({
         ...client,
         projects: client.projects.map((project) => ({
           ...project,
@@ -2033,7 +2057,15 @@ export default function WorkspaceEditorApp() {
           ),
         })),
       })),
-    }));
+    };
+    setData(nextData);
+    if (!cloudEnabled || activeWorkspaceIsLocal) {
+      void setLocalWorkspaceState(activeWorkspaceId, {
+        data: nextData,
+        selection,
+        level: selectionLevel,
+      });
+    }
   }
 
   function pickPreviewMedia() {
