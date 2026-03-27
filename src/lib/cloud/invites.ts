@@ -36,6 +36,14 @@ export type CloudIncomingWorkspaceInvite = {
   expiresAt: string;
 };
 
+export type CloudWorkspaceMember = {
+  userId: string;
+  email: string | null;
+  role: "owner" | "member";
+  joinedAt: string;
+  isCurrentUser: boolean;
+};
+
 function normalizeInviteRole(value: unknown): "owner" | "member" {
   return value === "owner" ? "owner" : "member";
 }
@@ -177,4 +185,29 @@ export async function acceptWorkspaceInvite(
     organizationId: row.organization_id,
     role: normalizeInviteRole(row.role),
   };
+}
+
+export async function listWorkspaceMembers(
+  supabase: SupabaseClient,
+  workspaceId: string
+): Promise<CloudWorkspaceMember[]> {
+  const { data, error } = await supabase.rpc("list_workspace_members", {
+    p_workspace_id: workspaceId,
+  });
+  if (error) {
+    throw new Error(
+      normalizeSupabaseErrorMessage(error, "Unable to load workspace members.")
+    );
+  }
+  const rows = Array.isArray(data) ? data : [];
+  return rows
+    .map((row) => ({
+      userId: typeof row.user_id === "string" ? row.user_id : "",
+      email: typeof row.email === "string" ? row.email : null,
+      role: normalizeInviteRole(row.role),
+      joinedAt:
+        typeof row.joined_at === "string" ? row.joined_at : new Date().toISOString(),
+      isCurrentUser: row.is_self === true,
+    }))
+    .filter((row) => Boolean(row.userId));
 }

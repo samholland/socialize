@@ -31,10 +31,12 @@ import {
 import {
   acceptWorkspaceInvite,
   createWorkspaceInvite,
+  listWorkspaceMembers,
   listMyPendingWorkspaceInvites,
   listWorkspaceInvites,
   revokeWorkspaceInvite,
   type CloudIncomingWorkspaceInvite,
+  type CloudWorkspaceMember,
   type CloudWorkspaceInvite,
 } from "@/lib/cloud/invites";
 import {
@@ -1491,6 +1493,7 @@ export default function WorkspaceEditorApp() {
       setCloudHydrated(false);
       setShowImportPrompt(false);
       setWorkspaceSyncConflicts({});
+      cloudWorkspaceDataSignatureRef.current = {};
       setWorkspaces([localWorkspaceEntry]);
       setActiveWorkspaceId(localWorkspaceEntry.id);
       setData(DEFAULT_EMPTY_DATA);
@@ -1503,6 +1506,7 @@ export default function WorkspaceEditorApp() {
     let cancelled = false;
     void (async () => {
       try {
+        cloudWorkspaceDataSignatureRef.current = {};
         const localWorkspaceEntry = createLocalWorkspace();
         const localState = await loadPrimaryLocalWorkspaceState();
         const personal = await ensureProfileAndPersonalWorkspace(supabase, authUser);
@@ -1551,6 +1555,7 @@ export default function WorkspaceEditorApp() {
           const normalized = normalizeData(cloudData as AppData);
           const sel = defaultSelection(normalized);
           if (cancelled) return;
+          setCloudDataSignature(wsId, normalized);
           setData(normalized);
           setSelection(sel);
           setSelectionLevel("campaign");
@@ -1597,6 +1602,11 @@ export default function WorkspaceEditorApp() {
   const [workspaceInvitesByWorkspace, setWorkspaceInvitesByWorkspace] = useState<
     Record<string, CloudWorkspaceInvite[]>
   >({});
+  const [workspaceMembersByWorkspace, setWorkspaceMembersByWorkspace] = useState<
+    Record<string, CloudWorkspaceMember[]>
+  >({});
+  const [workspaceMembersLoading, setWorkspaceMembersLoading] = useState(false);
+  const [workspaceMembersError, setWorkspaceMembersError] = useState<string | null>(null);
   const [workspaceInvitesLoading, setWorkspaceInvitesLoading] = useState(false);
   const [workspaceInvitesSaving, setWorkspaceInvitesSaving] = useState(false);
   const [workspaceInviteUpgradeLoading, setWorkspaceInviteUpgradeLoading] =
@@ -1616,8 +1626,7 @@ export default function WorkspaceEditorApp() {
   const [activeCampaignPresence, setActiveCampaignPresence] = useState<
     CloudEditorPresence[]
   >([]);
-  const [activeCampaignPresenceLoading, setActiveCampaignPresenceLoading] =
-    useState(false);
+  const [, setActiveCampaignPresenceLoading] = useState(false);
   const [activeCampaignPresenceError, setActiveCampaignPresenceError] = useState<
     string | null
   >(null);
@@ -1693,6 +1702,7 @@ export default function WorkspaceEditorApp() {
   const saveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydratedWorkspaceRef = useRef<string>("");
   const workspaceTreeDataRef = useRef<Record<string, AppData>>({});
+  const cloudWorkspaceDataSignatureRef = useRef<Record<string, string>>({});
   const localWorkspace =
     workspaces.find((w) => w.kind === "local") ?? createLocalWorkspace();
   const activeWorkspace =
@@ -1722,6 +1732,48 @@ export default function WorkspaceEditorApp() {
     });
   }
 
+  function setCloudDataSignatureValue(workspaceId: string, signature: string) {
+    cloudWorkspaceDataSignatureRef.current[workspaceId] = signature;
+  }
+
+  function setCloudDataSignature(workspaceId: string, nextData: AppData) {
+    try {
+      setCloudDataSignatureValue(workspaceId, JSON.stringify(nextData));
+    } catch {
+      delete cloudWorkspaceDataSignatureRef.current[workspaceId];
+    }
+  }
+
+  async function resolveStaleWorkspaceConflict(
+    workspaceId: string,
+    expectedData: AppData
+  ): Promise<boolean> {
+    if (!cloudEnabled || !supabase || !authUser) return false;
+    try {
+      const [remoteDataRaw, latestWorkspaces] = await Promise.all([
+        loadCloudWorkspaceData(supabase, workspaceId),
+        refreshCloudWorkspaceList(),
+      ]);
+      const remoteData = normalizeData(remoteDataRaw as AppData);
+      const expectedSerialized = JSON.stringify(expectedData);
+      const remoteSerialized = JSON.stringify(remoteData);
+      const latestWorkspace = latestWorkspaces.find(
+        (workspace) => workspace.id === workspaceId
+      );
+      if (latestWorkspace && typeof latestWorkspace.revision === "number") {
+        setWorkspaceRevision(workspaceId, latestWorkspace.revision);
+      }
+      if (expectedSerialized === remoteSerialized) {
+        setCloudDataSignatureValue(workspaceId, expectedSerialized);
+        clearWorkspaceConflict(workspaceId);
+        return true;
+      }
+    } catch (error) {
+      console.warn("Failed to resolve workspace conflict", error);
+    }
+    return false;
+  }
+
   useEffect(() => {
     if (renamingWorkspaceId) return;
     setWorkspaceRenameDraft(activeWorkspace.name);
@@ -1738,6 +1790,9 @@ export default function WorkspaceEditorApp() {
       setIncomingWorkspaceInvites([]);
       setIncomingWorkspaceInvitesError(null);
       setWorkspaceInvitesByWorkspace({});
+      setWorkspaceMembersByWorkspace({});
+      setWorkspaceMembersLoading(false);
+      setWorkspaceMembersError(null);
       setWorkspaceInvitesError(null);
       return;
     }
@@ -1748,9 +1803,12 @@ export default function WorkspaceEditorApp() {
   useEffect(() => {
     if (!cloudEnabled || !supabase || !authUser) return;
     if (activeWorkspace.kind !== "organization") {
+      setWorkspaceMembersLoading(false);
+      setWorkspaceMembersError(null);
       setWorkspaceInvitesError(null);
       return;
     }
+    void refreshWorkspaceMemberList(activeWorkspaceId);
     void refreshWorkspaceInviteList(activeWorkspaceId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cloudEnabled, supabase, authUser?.id, activeWorkspaceId, activeWorkspace.kind]);
@@ -1912,6 +1970,37 @@ export default function WorkspaceEditorApp() {
     }
   }
 
+  async function refreshWorkspaceMemberList(workspaceId = activeWorkspaceId) {
+    if (!cloudEnabled || !supabase || !authUser) return;
+    const workspace = workspaces.find((entry) => entry.id === workspaceId);
+    if (!workspace || workspace.kind !== "organization") return;
+
+    const isActive = workspaceId === activeWorkspaceId;
+    if (isActive) {
+      setWorkspaceMembersLoading(true);
+      setWorkspaceMembersError(null);
+    }
+    try {
+      const members = await listWorkspaceMembers(supabase, workspaceId);
+      setWorkspaceMembersByWorkspace((prev) => ({ ...prev, [workspaceId]: members }));
+    } catch (error) {
+      console.warn("Failed to load workspace members", error);
+      if (isActive) {
+        const message =
+          error instanceof Error ? error.message : "Unable to load workspace members.";
+        if (message.toLowerCase().includes("list_workspace_members")) {
+          setWorkspaceMembersError(
+            "Workspace members RPC is missing. Run migration 20260327_workspace_members.sql and refresh."
+          );
+        } else {
+          setWorkspaceMembersError(message);
+        }
+      }
+    } finally {
+      if (isActive) setWorkspaceMembersLoading(false);
+    }
+  }
+
   async function refreshCloudWorkspaceList(): Promise<Workspace[]> {
     if (!cloudEnabled || !supabase || !authUser) return workspaces;
     const localWorkspaceEntry = createLocalWorkspace();
@@ -1945,7 +2034,10 @@ export default function WorkspaceEditorApp() {
       if (!nextWorkspace || nextWorkspace.kind !== "organization") {
         throw new Error("Workspace conversion did not complete.");
       }
-      await refreshWorkspaceInviteList(activeWorkspaceId);
+      await Promise.all([
+        refreshWorkspaceMemberList(activeWorkspaceId),
+        refreshWorkspaceInviteList(activeWorkspaceId),
+      ]);
     } catch (error) {
       console.warn("Failed to enable workspace collaboration", error);
       let message =
@@ -1986,6 +2078,7 @@ export default function WorkspaceEditorApp() {
       );
       setWorkspaceInviteEmailDraft("");
       await Promise.all([
+        refreshWorkspaceMemberList(activeWorkspaceId),
         refreshWorkspaceInviteList(activeWorkspaceId),
         refreshIncomingWorkspaceInviteList(),
       ]);
@@ -2008,6 +2101,7 @@ export default function WorkspaceEditorApp() {
     try {
       await revokeWorkspaceInvite(supabase, inviteId);
       await Promise.all([
+        refreshWorkspaceMemberList(activeWorkspaceId),
         refreshWorkspaceInviteList(activeWorkspaceId),
         refreshIncomingWorkspaceInviteList(),
       ]);
@@ -2041,6 +2135,7 @@ export default function WorkspaceEditorApp() {
         accepted.workspaceId
       )) as CloudAppData;
       const normalized = normalizeData(cloudData as AppData);
+      setCloudDataSignature(accepted.workspaceId, normalized);
       hydratedWorkspaceRef.current = accepted.workspaceId;
       setActiveWorkspaceId(accepted.workspaceId);
       setData(normalized);
@@ -2051,6 +2146,7 @@ export default function WorkspaceEditorApp() {
       await hydrateSignedMediaForWorkspace(accepted.workspaceId, normalized);
 
       await Promise.all([
+        refreshWorkspaceMemberList(accepted.workspaceId),
         refreshIncomingWorkspaceInviteList(),
         refreshWorkspaceInviteList(accepted.workspaceId),
       ]);
@@ -2075,6 +2171,7 @@ export default function WorkspaceEditorApp() {
         activeWorkspaceId
       )) as CloudAppData;
       const normalized = normalizeData(cloudData as AppData);
+      setCloudDataSignature(activeWorkspaceId, normalized);
       const nextSelection = coerceSelection(normalized, selection);
       const nextLevel =
         nextSelection.campaignId
@@ -2129,6 +2226,7 @@ export default function WorkspaceEditorApp() {
         authUser.id,
         expectedRevision
       );
+      setCloudDataSignature(activeWorkspaceId, data);
       setWorkspaceRevision(activeWorkspaceId, saved.revision);
       clearWorkspaceConflict(activeWorkspaceId);
     } catch (error) {
@@ -2428,24 +2526,48 @@ export default function WorkspaceEditorApp() {
     }
     if (!supabase || !authUser || !cloudHydrated) return;
     if (hydratedWorkspaceRef.current !== activeWorkspaceId) return;
-    if (workspaceSyncConflicts[activeWorkspaceId]) return;
+    const dataSnapshot = data;
+    const dataSignature = JSON.stringify(dataSnapshot);
+    const lastSavedSignature =
+      cloudWorkspaceDataSignatureRef.current[activeWorkspaceId];
+    if (lastSavedSignature === undefined) {
+      setCloudDataSignatureValue(activeWorkspaceId, dataSignature);
+      clearWorkspaceConflict(activeWorkspaceId);
+      return;
+    }
+    if (lastSavedSignature === dataSignature) {
+      if (workspaceSyncConflicts[activeWorkspaceId]) {
+        void resolveStaleWorkspaceConflict(activeWorkspaceId, dataSnapshot);
+      }
+      return;
+    }
+    if (workspaceSyncConflicts[activeWorkspaceId]) {
+      void resolveStaleWorkspaceConflict(activeWorkspaceId, dataSnapshot);
+      return;
+    }
 
     if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
     saveDebounceRef.current = setTimeout(() => {
       void saveWorkspaceData(
         supabase,
         activeWorkspaceId,
-        data as CloudAppData,
+        dataSnapshot as CloudAppData,
         authUser.id,
         activeWorkspaceRevision
-      ).catch((error) => {
+      ).catch(async (error) => {
         if (error instanceof CloudWorkspaceConflictError) {
+          const resolved = await resolveStaleWorkspaceConflict(
+            activeWorkspaceId,
+            dataSnapshot
+          );
+          if (resolved) return;
           setWorkspaceConflict(activeWorkspaceId, error.message);
           return;
         }
         console.warn("Failed to save workspace", error);
       }).then((result) => {
         if (!result) return;
+        setCloudDataSignatureValue(activeWorkspaceId, dataSignature);
         setWorkspaceRevision(activeWorkspaceId, result.revision);
         clearWorkspaceConflict(activeWorkspaceId);
       });
@@ -2613,6 +2735,12 @@ export default function WorkspaceEditorApp() {
       }
       return changed ? next : prev;
     });
+    const allowed = new Set(workspaces.map((workspace) => workspace.id));
+    for (const workspaceId of Object.keys(cloudWorkspaceDataSignatureRef.current)) {
+      if (!allowed.has(workspaceId)) {
+        delete cloudWorkspaceDataSignatureRef.current[workspaceId];
+      }
+    }
   }, [workspaces]);
 
   useEffect(() => {
@@ -3538,15 +3666,29 @@ export default function WorkspaceEditorApp() {
     if (cloudEnabled && supabase && authUser) {
       const expectedRevision =
         typeof workspace.revision === "number" ? workspace.revision : 0;
-      const saved = await saveWorkspaceData(
-        supabase,
-        workspaceId,
-        nextData as CloudAppData,
-        authUser.id,
-        expectedRevision
-      );
-      setWorkspaceRevision(workspaceId, saved.revision);
-      clearWorkspaceConflict(workspaceId);
+      try {
+        const saved = await saveWorkspaceData(
+          supabase,
+          workspaceId,
+          nextData as CloudAppData,
+          authUser.id,
+          expectedRevision
+        );
+        setCloudDataSignature(workspaceId, nextData);
+        setWorkspaceRevision(workspaceId, saved.revision);
+        clearWorkspaceConflict(workspaceId);
+      } catch (error) {
+        if (error instanceof CloudWorkspaceConflictError) {
+          const resolved = await resolveStaleWorkspaceConflict(
+            workspaceId,
+            nextData
+          );
+          if (resolved) return;
+          setWorkspaceConflict(workspaceId, error.message);
+          return;
+        }
+        throw error;
+      }
     }
   }
 
@@ -3605,6 +3747,9 @@ export default function WorkspaceEditorApp() {
 
       hydratedWorkspaceRef.current = wsId;
       setActiveWorkspaceId(wsId);
+      if (target.kind !== "local") {
+        setCloudDataSignature(wsId, next.data);
+      }
       setData(next.data);
       setWorkspaceTreeData((prev) => ({ ...prev, [wsId]: next.data }));
       setSelection(resolvedSelection);
@@ -3684,6 +3829,10 @@ export default function WorkspaceEditorApp() {
           const { [targetWorkspaceId]: _ignored, ...rest } = prev;
           return rest;
         });
+        setWorkspaceMembersByWorkspace((prev) => {
+          const { [targetWorkspaceId]: _ignored, ...rest } = prev;
+          return rest;
+        });
 
         await refreshCloudWorkspaceList();
         await switchWorkspace(LOCAL_WORKSPACE_ID, "workspace");
@@ -3741,6 +3890,7 @@ export default function WorkspaceEditorApp() {
         authUser.id,
         expectedRevision
       );
+      setCloudDataSignature(targetWorkspace.id, merged);
       setWorkspaceRevision(targetWorkspace.id, saved.revision);
       clearWorkspaceConflict(targetWorkspace.id);
       if (targetWorkspace.id === activeWorkspaceId) {
@@ -3771,6 +3921,7 @@ export default function WorkspaceEditorApp() {
   async function signOut() {
     if (!supabase) return;
     await supabase.auth.signOut();
+    cloudWorkspaceDataSignatureRef.current = {};
     replaceCampaignMedia({});
     router.replace("/login");
   }
@@ -6039,6 +6190,7 @@ export default function WorkspaceEditorApp() {
     const counts = countWorkspaceEntities(data);
     const isLocalWorkspace = activeWorkspace.kind === "local";
     const workspaceInvites = workspaceInvitesByWorkspace[activeWorkspaceId] ?? [];
+    const workspaceMembers = workspaceMembersByWorkspace[activeWorkspaceId] ?? [];
     const inviteManageDenied =
       typeof workspaceInvitesError === "string" &&
       workspaceInvitesError.toLowerCase().includes("only workspace owners");
@@ -6257,6 +6409,57 @@ export default function WorkspaceEditorApp() {
                   </>
                 ) : (
                   <>
+                    <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                      Members in this workspace:
+                    </div>
+                    {workspaceMembersLoading ? (
+                      <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                        Loading members...
+                      </div>
+                    ) : workspaceMembersError ? (
+                      <div style={{ fontSize: 12, color: "var(--danger)" }}>
+                        {workspaceMembersError}
+                      </div>
+                    ) : workspaceMembers.length === 0 ? (
+                      <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                        No members found.
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {workspaceMembers.map((member) => (
+                          <div
+                            key={member.userId}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              gap: 10,
+                              border: "1px solid var(--line)",
+                              borderRadius: 10,
+                              padding: "8px 10px",
+                            }}
+                          >
+                            <div style={{ minWidth: 0 }}>
+                              <div
+                                style={{
+                                  color: "var(--ink)",
+                                  fontSize: 13,
+                                  fontWeight: 600,
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                }}
+                              >
+                                {member.email ?? "Unknown user"}
+                              </div>
+                              <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                                {member.role === "owner" ? "Owner" : "Member"}
+                                {member.isCurrentUser ? " · You" : ""}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     <div style={{ fontSize: 12, color: "var(--muted)" }}>
                       Invite collaborators by email. Invites are scoped to this workspace.
                     </div>
@@ -6782,7 +6985,8 @@ export default function WorkspaceEditorApp() {
     const ctaColorDraft = ctaColorDrafts[campaign.id] ?? campaign.ctaBgColor;
     const engagementKey = engagementSettingKey(campaign.id);
     const engagement = engagementSettingForCampaign(campaign.id);
-    const showPresenceCard = cloudEnabled && !activeWorkspaceIsLocal;
+    const showPresenceCard =
+      cloudEnabled && !activeWorkspaceIsLocal && activeCampaignHasPresenceLock;
     const editorsSummary =
       activeCampaignPresenceLabels.length > 0
         ? activeCampaignPresenceLabels.join(", ")
@@ -6824,9 +7028,7 @@ export default function WorkspaceEditorApp() {
                   style={{
                     padding: 12,
                     gap: 8,
-                    border: activeCampaignHasPresenceLock
-                      ? "1px solid var(--danger-soft)"
-                      : "1px solid var(--line)",
+                    border: "1px solid var(--danger-soft)",
                   }}
                 >
                   <div
@@ -6841,45 +7043,31 @@ export default function WorkspaceEditorApp() {
                       style={{
                         fontSize: 12,
                         fontWeight: 700,
-                        color: activeCampaignHasPresenceLock
-                          ? "var(--danger)"
-                          : "var(--ink-2)",
+                        color: "var(--danger)",
                       }}
                     >
-                      {activeCampaignHasPresenceLock
-                        ? "Editing lock active"
-                        : "Editing lock available"}
+                      Someone else is editing
                     </div>
-                    {activeCampaignHasPresenceLock && (
-                      <button
-                        type="button"
-                        className={`btn btn-xs ${
-                          activeCampaignPresenceOverride
-                            ? "btn-secondary"
-                            : "btn-danger"
-                        }`}
-                        onClick={() =>
-                          setActiveCampaignPresenceOverride((previous) => !previous)
-                        }
-                      >
-                        {activeCampaignPresenceOverride ? "Release Override" : "Take Over"}
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className={`btn btn-xs ${
+                        activeCampaignPresenceOverride ? "btn-secondary" : "btn-danger"
+                      }`}
+                      onClick={() =>
+                        setActiveCampaignPresenceOverride((previous) => !previous)
+                      }
+                    >
+                      {activeCampaignPresenceOverride ? "Release Override" : "Take Over"}
+                    </button>
                   </div>
                   <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
-                    {activeCampaignPresenceLoading
-                      ? "Checking active editors..."
-                      : activeCampaignHasPresenceLock
-                        ? activeCampaignPresenceOverride
-                          ? `Overriding lock while ${editorsSummary} ${
-                              activeCampaignPresenceOthers.length === 1
-                                ? "is"
-                                : "are"
-                            } editing.`
-                          : `${editorsSummary} ${
-                              activeCampaignPresenceOthers.length === 1 ? "is" : "are"
-                            } editing this ad right now.`
-                        : "No other active editors detected."}
+                    {activeCampaignPresenceOverride
+                      ? `Overriding while ${editorsSummary} ${
+                          activeCampaignPresenceOthers.length === 1 ? "is" : "are"
+                        } editing this ad right now.`
+                      : `${editorsSummary} ${
+                          activeCampaignPresenceOthers.length === 1 ? "is" : "are"
+                        } editing this ad right now.`}
                   </div>
                   {activeCampaignPresenceError && (
                     <div style={{ fontSize: 12, color: "var(--danger)" }}>
