@@ -50,7 +50,7 @@ type MediaAspect = "1:1" | "3:4" | "9:16";
 type CampaignObjective = "Awareness" | "Consideration" | "Conversion";
 type CampaignStatus = "draft" | "ready";
 type EngagementPreset = "low" | "medium" | "high";
-type SelectionLevel = "client" | "project" | "campaign";
+type SelectionLevel = "workspace" | "client" | "project" | "campaign";
 // EditorMode kept minimal — Campaign tab removed, only Ad editor remains
 
 type Campaign = {
@@ -144,6 +144,15 @@ type LocalDebugStats = {
   };
 };
 
+type WorkspaceStorageEstimate = {
+  usage: number;
+  quota: number;
+  free: number;
+  usagePct: number;
+  persisted: boolean | null;
+  generatedAtIso: string;
+};
+
 type CampaignDragPayload = {
   campaignId: string;
   sourceClientId: string;
@@ -160,6 +169,8 @@ const WS_DATA_PREFIX = "socialize.ws.";
 const CLOUD_ACTIVE_WS_KEY = "socialize.cloud.activeWs";
 const CLOUD_IMPORT_DONE_PREFIX = "socialize.cloud.import.done.";
 const LOCAL_WORKSPACE_ID = "ws_local";
+const LOCAL_WS_NAME_KEY = "socialize.localWorkspaceName";
+const DEFAULT_LOCAL_WORKSPACE_NAME = "Local Workspace";
 const DEFAULT_MOCKUP_BACKDROP = "#ffffff";
 const LOCAL_MEDIA_PATH_PREFIX = "local:";
 
@@ -286,6 +297,45 @@ function normalizePlatform(v: unknown): Platform {
 function normalizeObjective(v: unknown): CampaignObjective {
   if (v === "Consideration" || v === "Conversion") return v;
   return "Awareness";
+}
+
+function normalizeSelectionLevel(v: unknown): SelectionLevel {
+  if (
+    v === "workspace" ||
+    v === "client" ||
+    v === "project" ||
+    v === "campaign"
+  ) {
+    return v;
+  }
+  return "campaign";
+}
+
+function normalizeWorkspaceName(
+  value: string | undefined,
+  fallback = DEFAULT_LOCAL_WORKSPACE_NAME
+): string {
+  if (typeof value !== "string") return fallback;
+  const normalized = value.trim().replace(/\s+/g, " ");
+  return normalized || fallback;
+}
+
+function loadLocalWorkspaceName(): string {
+  if (typeof window === "undefined") return DEFAULT_LOCAL_WORKSPACE_NAME;
+  try {
+    const stored = localStorage.getItem(LOCAL_WS_NAME_KEY);
+    return normalizeWorkspaceName(stored ?? undefined);
+  } catch {
+    return DEFAULT_LOCAL_WORKSPACE_NAME;
+  }
+}
+
+function createLocalWorkspace(): Workspace {
+  return {
+    id: LOCAL_WORKSPACE_ID,
+    name: loadLocalWorkspaceName(),
+    kind: "local",
+  };
 }
 
 function normalizeStringList(v: unknown): string[] {
@@ -505,6 +555,32 @@ function defaultSelection(data: AppData): Selection {
   };
 }
 
+function coerceSelection(data: AppData, selection: Selection): Selection {
+  const fallback = defaultSelection(data);
+  const client =
+    data.clients.find((candidate) => candidate.id === selection.clientId) ??
+    data.clients[0];
+  if (!client) return fallback;
+  const project =
+    client.projects.find((candidate) => candidate.id === selection.projectId) ??
+    client.projects[0];
+  if (!project) {
+    return {
+      clientId: client.id,
+      projectId: "",
+      campaignId: "",
+    };
+  }
+  const campaign =
+    project.campaigns.find((candidate) => candidate.id === selection.campaignId) ??
+    project.campaigns[0];
+  return {
+    clientId: client.id,
+    projectId: project.id,
+    campaignId: campaign?.id ?? "",
+  };
+}
+
 function isLocalMediaStoragePath(path: string | undefined): path is string {
   return typeof path === "string" && path.startsWith(LOCAL_MEDIA_PATH_PREFIX);
 }
@@ -622,8 +698,7 @@ function loadWorkspaceDataFromLocalStorage(
     }
     const data = normalizeData(parsed.data);
     const sel = parsed.selection ?? defaultSelection(data);
-    const level: SelectionLevel =
-      parsed.level === "client" || parsed.level === "project" ? parsed.level : "campaign";
+    const level = normalizeSelectionLevel(parsed.level);
     return { data, selection: sel, level };
   } catch {
     const data = emptyWorkspace();
@@ -668,10 +743,7 @@ async function loadPrimaryLocalWorkspaceState(): Promise<WorkspaceStateSnapshot>
     const normalized = {
       data: normalizeData(indexed.data),
       selection: indexed.selection ?? defaultSelection(normalizeData(indexed.data)),
-      level:
-        indexed.level === "client" || indexed.level === "project"
-          ? indexed.level
-          : "campaign",
+      level: normalizeSelectionLevel(indexed.level),
     } satisfies WorkspaceStateSnapshot;
     if (snapshotHasData(normalized)) {
       return normalized;
@@ -780,6 +852,7 @@ type UiPrefs = {
   igFeedOverlayOffsetY: number;
   mockupBackdropColor: string;
   transparentPngExport: boolean;
+  expandedWorkspaces: Record<string, boolean>;
   expandedClients: Record<string, boolean>;
   expandedProjects: Record<string, boolean>;
   storyCtaOffsets: Record<string, { x: number; y: number }>;
@@ -844,6 +917,7 @@ function loadUiPrefs(): UiPrefs {
     igFeedOverlayOffsetY: 0,
     mockupBackdropColor: DEFAULT_MOCKUP_BACKDROP,
     transparentPngExport: false,
+    expandedWorkspaces: {},
     expandedClients: {},
     expandedProjects: {},
     storyCtaOffsets: {},
@@ -863,6 +937,7 @@ function loadUiPrefs(): UiPrefs {
       igFeedOverlayOffsetY?: number;
       mockupBackdropColor?: string;
       transparentPngExport?: boolean;
+      expandedWorkspaces?: Record<string, boolean>;
       expandedClients?: Record<string, boolean>;
       expandedProjects?: Record<string, boolean>;
       storyCtaOffsets?: Record<string, { x: number; y: number }>;
@@ -906,6 +981,7 @@ function loadUiPrefs(): UiPrefs {
         typeof parsed.transparentPngExport === "boolean"
           ? parsed.transparentPngExport
           : fallback.transparentPngExport,
+      expandedWorkspaces: normalizeBooleanRecord(parsed.expandedWorkspaces),
       expandedClients: normalizeBooleanRecord(parsed.expandedClients),
       expandedProjects: normalizeBooleanRecord(parsed.expandedProjects),
       storyCtaOffsets: normalizeStoryCtaOffsets(parsed.storyCtaOffsets),
@@ -1182,7 +1258,7 @@ function ResizeHandle({ onDrag }: { onDrag: (dx: number) => void }) {
 
 const DEFAULT_WS: Workspace = {
   id: LOCAL_WORKSPACE_ID,
-  name: "Local Workspace",
+  name: DEFAULT_LOCAL_WORKSPACE_NAME,
   kind: "local",
 };
 const DEFAULT_EMPTY_DATA = emptyWorkspace();
@@ -1231,6 +1307,7 @@ export default function WorkspaceEditorApp() {
     setIgFeedOverlayOffsetY(ui.igFeedOverlayOffsetY);
     setMockupBackdropColor(ui.mockupBackdropColor);
     setTransparentPngExport(ui.transparentPngExport);
+    setExpandedWorkspaces(ui.expandedWorkspaces);
     setExpandedClients(ui.expandedClients);
     setExpandedProjects(ui.expandedProjects);
     setStoryCtaOffsets(ui.storyCtaOffsets);
@@ -1251,15 +1328,16 @@ export default function WorkspaceEditorApp() {
     if (cloudEnabled) return;
     let cancelled = false;
     void (async () => {
+      const localWorkspaceEntry = createLocalWorkspace();
       const wsData = await loadPrimaryLocalWorkspaceState();
       if (cancelled) return;
-      setWorkspaces([DEFAULT_WS]);
-      setActiveWorkspaceId(DEFAULT_WS.id);
-      hydratedWorkspaceRef.current = DEFAULT_WS.id;
+      setWorkspaces([localWorkspaceEntry]);
+      setActiveWorkspaceId(localWorkspaceEntry.id);
+      hydratedWorkspaceRef.current = localWorkspaceEntry.id;
       setData(wsData.data);
       setSelection(wsData.selection);
       setSelectionLevel(wsData.level);
-      await hydrateLocalMediaForWorkspace(DEFAULT_WS.id, wsData.data);
+      await hydrateLocalMediaForWorkspace(localWorkspaceEntry.id, wsData.data);
       setStorageReady(true);
     })();
     return () => {
@@ -1307,11 +1385,12 @@ export default function WorkspaceEditorApp() {
     if (!authReady) return;
 
     if (!authUser) {
+      const localWorkspaceEntry = createLocalWorkspace();
       setStorageReady(false);
       setCloudHydrated(false);
       setShowImportPrompt(false);
-      setWorkspaces([DEFAULT_WS]);
-      setActiveWorkspaceId(DEFAULT_WS.id);
+      setWorkspaces([localWorkspaceEntry]);
+      setActiveWorkspaceId(localWorkspaceEntry.id);
       setData(DEFAULT_EMPTY_DATA);
       replaceCampaignMedia({});
       setSelection(DEFAULT_SELECTION);
@@ -1322,6 +1401,7 @@ export default function WorkspaceEditorApp() {
     let cancelled = false;
     void (async () => {
       try {
+        const localWorkspaceEntry = createLocalWorkspace();
         const localState = await loadPrimaryLocalWorkspaceState();
         const personal = await ensureProfileAndPersonalWorkspace(supabase, authUser);
         const wsList = await listAccessibleWorkspaces(supabase, authUser.id);
@@ -1330,9 +1410,9 @@ export default function WorkspaceEditorApp() {
             ? wsList
             : [personal];
         const resolvedList: Workspace[] = [
-          DEFAULT_WS,
+          localWorkspaceEntry,
           ...cloudWorkspaces
-            .filter((w) => w.id !== DEFAULT_WS.id)
+            .filter((w) => w.id !== localWorkspaceEntry.id)
             .map((w) => ({ id: w.id, name: w.name, kind: w.kind })),
         ];
 
@@ -1342,14 +1422,14 @@ export default function WorkspaceEditorApp() {
             : null;
         const wsId =
           (storedActive && resolvedList.find((w) => w.id === storedActive)?.id) ||
-          DEFAULT_WS.id ||
+          localWorkspaceEntry.id ||
           personal.id;
 
         if (cancelled) return;
         setWorkspaces(resolvedList);
         setActiveWorkspaceId(wsId);
         hydratedWorkspaceRef.current = wsId;
-        if (wsId === DEFAULT_WS.id) {
+        if (wsId === localWorkspaceEntry.id) {
           setData(localState.data);
           setSelection(localState.selection);
           setSelectionLevel(localState.level);
@@ -1400,6 +1480,10 @@ export default function WorkspaceEditorApp() {
   const [debugPanelLoading, setDebugPanelLoading] = useState(false);
   const [debugPanelError, setDebugPanelError] = useState<string | null>(null);
   const [localDebugStats, setLocalDebugStats] = useState<LocalDebugStats | null>(null);
+  const [workspaceStorageEstimate, setWorkspaceStorageEstimate] =
+    useState<WorkspaceStorageEstimate | null>(null);
+  const [workspaceStorageLoading, setWorkspaceStorageLoading] = useState(false);
+  const [workspaceStorageError, setWorkspaceStorageError] = useState<string | null>(null);
 
   // Undo
   const [pendingUndo, setPendingUndo] = useState<PendingUndo | null>(null);
@@ -1416,10 +1500,17 @@ export default function WorkspaceEditorApp() {
 
   // Inline renaming
   const [editingName, setEditingName] = useState<EditingName | null>(null);
+  const [isRenamingLocalWorkspace, setIsRenamingLocalWorkspace] = useState(false);
+  const [localWorkspaceNameDraft, setLocalWorkspaceNameDraft] = useState("");
+  const [workspaceNameFieldDraft, setWorkspaceNameFieldDraft] = useState("");
 
   // Tree expand/collapse
+  const [expandedWorkspaces, setExpandedWorkspaces] = useState<Record<string, boolean>>({});
   const [expandedClients, setExpandedClients] = useState<Record<string, boolean>>({});
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
+  const [workspaceTreeData, setWorkspaceTreeData] = useState<Record<string, AppData>>({});
+  const [workspaceTreeLoading, setWorkspaceTreeLoading] = useState<Record<string, boolean>>({});
+  const [workspaceTreeErrors, setWorkspaceTreeErrors] = useState<Record<string, string>>({});
   const [storyCtaOffsets, setStoryCtaOffsets] = useState<
     Record<string, { x: number; y: number }>
   >({});
@@ -1452,12 +1543,65 @@ export default function WorkspaceEditorApp() {
   const previewExportRef = useRef<HTMLDivElement>(null);
   const saveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydratedWorkspaceRef = useRef<string>("");
+  const workspaceTreeDataRef = useRef<Record<string, AppData>>({});
+  const localWorkspace =
+    workspaces.find((w) => w.kind === "local") ?? createLocalWorkspace();
   const activeWorkspace =
-    workspaces.find((w) => w.id === activeWorkspaceId) ?? DEFAULT_WS;
+    workspaces.find((w) => w.id === activeWorkspaceId) ?? localWorkspace;
   const activeWorkspaceIsLocal = activeWorkspace.kind === "local";
+
+  useEffect(() => {
+    if (isRenamingLocalWorkspace) return;
+    setLocalWorkspaceNameDraft(localWorkspace.name);
+    setWorkspaceNameFieldDraft(localWorkspace.name);
+  }, [localWorkspace.name, isRenamingLocalWorkspace]);
+
+  function updateLocalWorkspaceName(nextNameRaw: string): string {
+    const normalized = normalizeWorkspaceName(nextNameRaw);
+    setWorkspaces((prev) => {
+      let foundLocal = false;
+      const next = prev.map((workspace) => {
+        if (workspace.kind !== "local") return workspace;
+        foundLocal = true;
+        if (workspace.name === normalized) return workspace;
+        return { ...workspace, name: normalized };
+      });
+      if (foundLocal) return next;
+      return [{ id: LOCAL_WORKSPACE_ID, name: normalized, kind: "local" }, ...next];
+    });
+    safeSetLocalStorage(LOCAL_WS_NAME_KEY, normalized);
+    return normalized;
+  }
+
+  function beginLocalWorkspaceRename() {
+    setIsRenamingLocalWorkspace(true);
+    setLocalWorkspaceNameDraft(localWorkspace.name);
+  }
+
+  function commitLocalWorkspaceRename() {
+    const normalized = updateLocalWorkspaceName(localWorkspaceNameDraft);
+    setLocalWorkspaceNameDraft(normalized);
+    setWorkspaceNameFieldDraft(normalized);
+    setIsRenamingLocalWorkspace(false);
+  }
+
+  function cancelLocalWorkspaceRename() {
+    setLocalWorkspaceNameDraft(localWorkspace.name);
+    setIsRenamingLocalWorkspace(false);
+  }
+
+  function commitWorkspaceNameField() {
+    const normalized = updateLocalWorkspaceName(workspaceNameFieldDraft);
+    setWorkspaceNameFieldDraft(normalized);
+    setLocalWorkspaceNameDraft(normalized);
+  }
 
   function clientExpandKey(clientId: string, workspaceId = activeWorkspaceId): string {
     return `${workspaceId}::client::${clientId}`;
+  }
+
+  function workspaceExpandKey(workspaceId: string): string {
+    return `workspace::${workspaceId}`;
   }
 
   function projectExpandKey(projectId: string, workspaceId = activeWorkspaceId): string {
@@ -1556,6 +1700,101 @@ export default function WorkspaceEditorApp() {
       setDebugPanelLoading(false);
     }
   }, [activeWorkspace.kind]);
+
+  const refreshWorkspaceStorageEstimate = useCallback(async () => {
+    if (typeof navigator === "undefined" || !navigator.storage) {
+      setWorkspaceStorageEstimate(null);
+      setWorkspaceStorageError("Storage estimate is unavailable in this browser.");
+      return;
+    }
+
+    setWorkspaceStorageLoading(true);
+    setWorkspaceStorageError(null);
+    try {
+      const estimate = await navigator.storage.estimate();
+      const usage = Math.max(0, estimate.usage ?? 0);
+      const quota = Math.max(0, estimate.quota ?? 0);
+      const free = Math.max(0, quota - usage);
+      const usagePct = quota > 0 ? Math.min(100, (usage / quota) * 100) : 0;
+      const persisted =
+        typeof navigator.storage.persisted === "function"
+          ? await navigator.storage.persisted()
+          : null;
+
+      setWorkspaceStorageEstimate({
+        usage,
+        quota,
+        free,
+        usagePct,
+        persisted,
+        generatedAtIso: new Date().toISOString(),
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to estimate browser storage.";
+      setWorkspaceStorageEstimate(null);
+      setWorkspaceStorageError(message);
+    } finally {
+      setWorkspaceStorageLoading(false);
+    }
+  }, []);
+
+  const loadWorkspaceDataForTree = useCallback(
+    async (workspaceId: string, force = false) => {
+      const workspace = workspaces.find((candidate) => candidate.id === workspaceId);
+      if (!workspace) return;
+      if (!force && workspaceTreeDataRef.current[workspaceId]) return;
+
+      setWorkspaceTreeLoading((prev) => ({ ...prev, [workspaceId]: true }));
+      setWorkspaceTreeErrors((prev) => {
+        if (!prev[workspaceId]) return prev;
+        const next = { ...prev };
+        delete next[workspaceId];
+        return next;
+      });
+
+      try {
+        let loadedData: AppData;
+        if (workspaceId === activeWorkspaceId) {
+          loadedData = data;
+        } else if (workspace.kind === "local") {
+          const local = await loadPrimaryLocalWorkspaceState();
+          loadedData = local.data;
+        } else if (cloudEnabled && supabase && authUser) {
+          const cloudData = (await loadCloudWorkspaceData(
+            supabase,
+            workspaceId
+          )) as CloudAppData;
+          loadedData = normalizeData(cloudData as AppData);
+        } else {
+          loadedData = emptyWorkspace();
+        }
+
+        setWorkspaceTreeData((prev) => ({
+          ...prev,
+          [workspaceId]: loadedData,
+        }));
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Failed to load workspace.";
+        setWorkspaceTreeErrors((prev) => ({ ...prev, [workspaceId]: message }));
+      } finally {
+        setWorkspaceTreeLoading((prev) => ({ ...prev, [workspaceId]: false }));
+      }
+    },
+    [
+      activeWorkspaceId,
+      authUser,
+      cloudEnabled,
+      data,
+      supabase,
+      workspaces,
+    ]
+  );
 
   // ── Persistence ────────────────────────────────────────────────
 
@@ -1664,6 +1903,7 @@ export default function WorkspaceEditorApp() {
         igFeedOverlayOffsetY,
         mockupBackdropColor,
         transparentPngExport,
+        expandedWorkspaces,
         expandedClients,
         expandedProjects,
         storyCtaOffsets,
@@ -1681,6 +1921,7 @@ export default function WorkspaceEditorApp() {
     igFeedOverlayOffsetY,
     mockupBackdropColor,
     transparentPngExport,
+    expandedWorkspaces,
     expandedClients,
     expandedProjects,
     storyCtaOffsets,
@@ -1692,10 +1933,98 @@ export default function WorkspaceEditorApp() {
   }, [campaignMedia]);
 
   useEffect(() => {
+    workspaceTreeDataRef.current = workspaceTreeData;
+  }, [workspaceTreeData]);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    setWorkspaceTreeData((prev) => ({
+      ...prev,
+      [activeWorkspaceId]: data,
+    }));
+  }, [storageReady, activeWorkspaceId, data]);
+
+  useEffect(() => {
+    setWorkspaceTreeData((prev) => {
+      const allowed = new Set(workspaces.map((workspace) => workspace.id));
+      const next: Record<string, AppData> = {};
+      let changed = false;
+      for (const [workspaceId, workspaceData] of Object.entries(prev)) {
+        if (!allowed.has(workspaceId)) {
+          changed = true;
+          continue;
+        }
+        next[workspaceId] = workspaceData;
+      }
+      return changed ? next : prev;
+    });
+    setWorkspaceTreeLoading((prev) => {
+      const allowed = new Set(workspaces.map((workspace) => workspace.id));
+      const next: Record<string, boolean> = {};
+      let changed = false;
+      for (const [workspaceId, isLoading] of Object.entries(prev)) {
+        if (!allowed.has(workspaceId)) {
+          changed = true;
+          continue;
+        }
+        next[workspaceId] = isLoading;
+      }
+      return changed ? next : prev;
+    });
+    setWorkspaceTreeErrors((prev) => {
+      const allowed = new Set(workspaces.map((workspace) => workspace.id));
+      const next: Record<string, string> = {};
+      let changed = false;
+      for (const [workspaceId, message] of Object.entries(prev)) {
+        if (!allowed.has(workspaceId)) {
+          changed = true;
+          continue;
+        }
+        next[workspaceId] = message;
+      }
+      return changed ? next : prev;
+    });
+  }, [workspaces]);
+
+  useEffect(() => {
     if (!debugPanelOpen) return;
     if (!storageReady) return;
     void refreshLocalDebugStats();
   }, [debugPanelOpen, storageReady, activeWorkspaceId, refreshLocalDebugStats]);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    for (const workspace of workspaces) {
+      const isExpanded = expandedWorkspaces[workspaceExpandKey(workspace.id)] !== false;
+      if (!isExpanded) continue;
+      if (workspaceTreeDataRef.current[workspace.id]) continue;
+      if (workspaceTreeLoading[workspace.id]) continue;
+      void loadWorkspaceDataForTree(workspace.id);
+    }
+  }, [
+    storageReady,
+    workspaces,
+    expandedWorkspaces,
+    workspaceTreeLoading,
+    loadWorkspaceDataForTree,
+  ]);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    if (selectionLevel !== "workspace") return;
+    if (!activeWorkspaceIsLocal) {
+      setWorkspaceStorageEstimate(null);
+      setWorkspaceStorageError(null);
+      return;
+    }
+    void refreshWorkspaceStorageEstimate();
+  }, [
+    storageReady,
+    selectionLevel,
+    activeWorkspaceId,
+    activeWorkspaceIsLocal,
+    refreshWorkspaceStorageEstimate,
+  ]);
 
   // Cleanup blob URLs on unmount
   useEffect(() => {
@@ -2162,81 +2491,77 @@ export default function WorkspaceEditorApp() {
 
   // ── Workspace management ───────────────────────────────────────
 
-  function switchWorkspace(wsId: string) {
-    if (wsId === activeWorkspaceId) return;
+  async function switchWorkspace(
+    wsId: string,
+    nextLevel?: SelectionLevel,
+    nextSelection?: Selection
+  ) {
+    if (wsId === activeWorkspaceId) {
+      if (nextSelection) setSelection(coerceSelection(data, nextSelection));
+      if (nextLevel) setSelectionLevel(nextLevel);
+      return;
+    }
     const target = workspaces.find((w) => w.id === wsId);
     if (!target) return;
 
-    if (target.kind === "local") {
-      setStorageReady(false);
-      void (async () => {
-        try {
-          const local = await loadPrimaryLocalWorkspaceState();
-          hydratedWorkspaceRef.current = wsId;
-          setActiveWorkspaceId(wsId);
-          setData(local.data);
-          setSelection(local.selection);
-          setSelectionLevel(local.level);
-          await hydrateLocalMediaForWorkspace(wsId, local.data);
-        } finally {
-          setStorageReady(true);
-        }
-      })();
-      return;
-    }
-
-    if (cloudEnabled) {
-      if (!supabase || !authUser) return;
-      setStorageReady(false);
-      void (async () => {
-        try {
-          const cloudData = (await loadCloudWorkspaceData(
-            supabase,
-            wsId
-          )) as CloudAppData;
-          const normalized = normalizeData(cloudData as AppData);
-          hydratedWorkspaceRef.current = wsId;
-          setActiveWorkspaceId(wsId);
-          setData(normalized);
-          setSelection(defaultSelection(normalized));
-          setSelectionLevel("campaign");
-          await hydrateSignedMediaForWorkspace(wsId, normalized);
-        } catch (error) {
-          console.error("Failed to switch workspace", error);
-          alert("Unable to switch workspace.");
-        } finally {
-          setStorageReady(true);
-        }
-      })();
-      return;
-    }
     setStorageReady(false);
-    void (async () => {
-      await setLocalWorkspaceState(activeWorkspaceId, {
-        data,
-        selection,
-        level: selectionLevel,
-      });
-      const indexed = await getLocalWorkspaceState<WorkspaceStateSnapshot>(wsId);
-      const next: WorkspaceStateSnapshot =
-        indexed && indexed.data
-          ? {
-              data: normalizeData(indexed.data),
-              selection: indexed.selection ?? defaultSelection(normalizeData(indexed.data)),
-              level:
-                indexed.level === "client" || indexed.level === "project"
-                  ? indexed.level
-                  : "campaign",
-            }
-          : loadWorkspaceDataFromLocalStorage(wsId);
+    try {
+      let next: WorkspaceStateSnapshot;
+      if (target.kind === "local") {
+        next = await loadPrimaryLocalWorkspaceState();
+      } else if (cloudEnabled && supabase && authUser) {
+        const cloudData = (await loadCloudWorkspaceData(
+          supabase,
+          wsId
+        )) as CloudAppData;
+        const normalized = normalizeData(cloudData as AppData);
+        next = {
+          data: normalized,
+          selection: defaultSelection(normalized),
+          level: "campaign",
+        };
+      } else {
+        await setLocalWorkspaceState(activeWorkspaceId, {
+          data,
+          selection,
+          level: selectionLevel,
+        });
+        const indexed = await getLocalWorkspaceState<WorkspaceStateSnapshot>(wsId);
+        next =
+          indexed && indexed.data
+            ? {
+                data: normalizeData(indexed.data),
+                selection:
+                  indexed.selection ?? defaultSelection(normalizeData(indexed.data)),
+                level: normalizeSelectionLevel(indexed.level),
+              }
+            : loadWorkspaceDataFromLocalStorage(wsId);
+      }
+
+      const resolvedSelection = coerceSelection(
+        next.data,
+        nextSelection ?? next.selection
+      );
+      const resolvedLevel = nextLevel ?? next.level;
+
       hydratedWorkspaceRef.current = wsId;
-      setData(next.data);
-      setSelection(next.selection);
-      setSelectionLevel(next.level);
       setActiveWorkspaceId(wsId);
-      await hydrateLocalMediaForWorkspace(wsId, next.data);
+      setData(next.data);
+      setWorkspaceTreeData((prev) => ({ ...prev, [wsId]: next.data }));
+      setSelection(resolvedSelection);
+      setSelectionLevel(resolvedLevel);
+
+      if (target.kind === "local") {
+        await hydrateLocalMediaForWorkspace(wsId, next.data);
+      } else if (cloudEnabled) {
+        await hydrateSignedMediaForWorkspace(wsId, next.data);
+      }
+    } catch (error) {
+      console.error("Failed to switch workspace", error);
+      alert("Unable to switch workspace.");
+    } finally {
       setStorageReady(true);
-    })();
+    }
   }
 
   function createWorkspace() {
@@ -2316,7 +2641,7 @@ export default function WorkspaceEditorApp() {
           setSelectionLevel("campaign");
         }
       } else {
-        switchWorkspace(targetWorkspace.id);
+        await switchWorkspace(targetWorkspace.id);
       }
       markImportDone(authUser.id);
       setShowImportPrompt(false);
@@ -2754,16 +3079,28 @@ export default function WorkspaceEditorApp() {
     setSelectionLevel("campaign");
   }
 
-  function toggleClient(clientId: string) {
-    const key = clientExpandKey(clientId);
+  function toggleWorkspace(workspaceId: string) {
+    const key = workspaceExpandKey(workspaceId);
+    const nextExpanded = !(expandedWorkspaces[key] ?? true);
+    setExpandedWorkspaces((prev) => ({
+      ...prev,
+      [key]: nextExpanded,
+    }));
+    if (nextExpanded) {
+      void loadWorkspaceDataForTree(workspaceId);
+    }
+  }
+
+  function toggleClient(clientId: string, workspaceId = activeWorkspaceId) {
+    const key = clientExpandKey(clientId, workspaceId);
     setExpandedClients((prev) => ({
       ...prev,
       [key]: !(prev[key] ?? true),
     }));
   }
 
-  function toggleProject(projectId: string) {
-    const key = projectExpandKey(projectId);
+  function toggleProject(projectId: string, workspaceId = activeWorkspaceId) {
+    const key = projectExpandKey(projectId, workspaceId);
     setExpandedProjects((prev) => ({
       ...prev,
       [key]: !(prev[key] ?? true),
@@ -3206,7 +3543,7 @@ export default function WorkspaceEditorApp() {
 
       if ((e.metaKey || e.ctrlKey) && e.key === "n") {
         e.preventDefault();
-        if (selection.clientId && selection.projectId) {
+        if (selectionLevel !== "workspace" && selection.clientId && selection.projectId) {
           addCampaign(selection.clientId, selection.projectId);
         }
       }
@@ -3229,10 +3566,403 @@ export default function WorkspaceEditorApp() {
   // ── Sidebar ───────────────────────────────────────────────────
 
   function renderSidebar() {
-    const hasClients = data.clients.length > 0;
-    const localWorkspace =
-      workspaces.find((w) => w.kind === "local") ?? DEFAULT_WS;
+    const localWorkspaceGroup =
+      workspaces.find((workspace) => workspace.kind === "local") ?? localWorkspace;
     const sharedWorkspaces = workspaces.filter((w) => w.kind !== "local");
+
+    const activateWorkspaceSelection = (
+      workspaceId: string,
+      nextSelection: Selection,
+      nextLevel: SelectionLevel
+    ) => {
+      if (workspaceId === activeWorkspaceId) {
+        setSelection(coerceSelection(data, nextSelection));
+        setSelectionLevel(nextLevel);
+        return;
+      }
+      void switchWorkspace(workspaceId, nextLevel, nextSelection);
+    };
+
+    const renderWorkspaceNode = (workspace: Workspace) => {
+      const isWorkspaceActive = workspace.id === activeWorkspaceId;
+      const workspaceData = isWorkspaceActive
+        ? data
+        : workspaceTreeData[workspace.id];
+      const workspaceLoading = Boolean(workspaceTreeLoading[workspace.id]);
+      const workspaceError = workspaceTreeErrors[workspace.id];
+      const isWorkspaceExpanded =
+        expandedWorkspaces[workspaceExpandKey(workspace.id)] !== false;
+      const isWorkspaceSelected = isWorkspaceActive && selectionLevel === "workspace";
+      const isLocalWorkspaceNode = workspace.kind === "local";
+
+      return (
+        <div key={workspace.id} className="tree-section tree-workspace-section">
+          <div
+            className={`tree-row tree-row-workspace tree-row-with-toggle${isWorkspaceSelected ? " is-selected" : ""}`}
+            onClick={(e) => {
+              if (isRenamingLocalWorkspace && isLocalWorkspaceNode) return;
+              void switchWorkspace(workspace.id, "workspace");
+              if ((e.target as HTMLElement).closest(".tree-no-toggle")) return;
+              toggleWorkspace(workspace.id);
+            }}
+            onDoubleClick={(e) => {
+              if (!isLocalWorkspaceNode) return;
+              e.preventDefault();
+              e.stopPropagation();
+              beginLocalWorkspaceRename();
+            }}
+          >
+            <IconWorkspace />
+            {isLocalWorkspaceNode && isRenamingLocalWorkspace ? (
+              <input
+                autoFocus
+                className="ws-inline-input tree-no-toggle"
+                value={localWorkspaceNameDraft}
+                onChange={(e) => setLocalWorkspaceNameDraft(e.target.value)}
+                onBlur={commitLocalWorkspaceRename}
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    commitLocalWorkspaceRename();
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    cancelLocalWorkspaceRename();
+                  }
+                }}
+              />
+            ) : (
+              <span className="tree-label tree-label-workspace tree-no-toggle">
+                {workspace.name}
+              </span>
+            )}
+            {isWorkspaceActive && (
+              <span className="ws-check" style={{ marginRight: 22 }}>
+                ✓
+              </span>
+            )}
+            <button
+              className="tree-toggle tree-toggle-end"
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleWorkspace(workspace.id);
+              }}
+              tabIndex={-1}
+            >
+              <IconChevron open={isWorkspaceExpanded} />
+            </button>
+          </div>
+
+          <div className={`tree-workspace-children${isWorkspaceExpanded ? " is-open" : ""}`}>
+            <div className="tree-workspace-children-inner">
+              {workspaceLoading && (
+                <div className="tree-workspace-meta">Loading workspace...</div>
+              )}
+              {!workspaceLoading && workspaceError && (
+                <div className="tree-workspace-meta tree-workspace-meta-error">
+                  {workspaceError}
+                </div>
+              )}
+              {!workspaceLoading &&
+                !workspaceError &&
+                (!workspaceData || workspaceData.clients.length === 0) && (
+                  <div className="tree-workspace-meta">No clients yet</div>
+                )}
+              {!workspaceLoading &&
+                !workspaceError &&
+                workspaceData &&
+                workspaceData.clients.map((client) => {
+                  const isClientSelected =
+                    isWorkspaceActive && selection.clientId === client.id;
+                  const isClientExpanded =
+                    expandedClients[clientExpandKey(client.id, workspace.id)] !== false;
+                  const isEditingClient =
+                    isWorkspaceActive &&
+                    editingName?.kind === "client" &&
+                    editingName.clientId === client.id;
+
+                  return (
+                    <div key={client.id} className="tree-section">
+                      <div
+                        className={`tree-row tree-row-client tree-row-with-toggle${isClientSelected && selectionLevel === "client" ? " is-selected" : ""}`}
+                        onClick={(e) => {
+                          const project = client.projects[0];
+                          const campaign = project?.campaigns[0];
+                          activateWorkspaceSelection(
+                            workspace.id,
+                            {
+                              clientId: client.id,
+                              projectId: project?.id ?? "",
+                              campaignId: campaign?.id ?? "",
+                            },
+                            "client"
+                          );
+                          if ((e.target as HTMLElement).closest(".tree-no-toggle")) return;
+                          toggleClient(client.id, workspace.id);
+                        }}
+                        onDoubleClick={() => {
+                          if (!isWorkspaceActive) return;
+                          beginClientEdit(client.id, client.name);
+                        }}
+                      >
+                        {isEditingClient ? (
+                          <input
+                            autoFocus
+                            className="tree-inline-input"
+                            value={editingName!.value}
+                            onChange={(e) =>
+                              setEditingName({ ...editingName!, value: e.target.value })
+                            }
+                            onBlur={commitEdit}
+                            onKeyDown={onEditKey}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        ) : (
+                          <span className="tree-label tree-label-client tree-no-toggle">
+                            {client.name}
+                          </span>
+                        )}
+
+                        <button
+                          className="tree-toggle tree-toggle-end"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleClient(client.id, workspace.id);
+                          }}
+                          tabIndex={-1}
+                        >
+                          <IconChevron open={isClientExpanded} />
+                        </button>
+                      </div>
+
+                      <div className={`tree-client-children${isClientExpanded ? " is-open" : ""}`}>
+                        <div className="tree-client-children-inner">
+                          {client.projects.map((project) => {
+                            const isProjSelected =
+                              isClientSelected && selection.projectId === project.id;
+                            const isProjExpanded =
+                              expandedProjects[projectExpandKey(project.id, workspace.id)] !== false;
+                            const isEditingProj =
+                              isWorkspaceActive &&
+                              editingName?.kind === "project" &&
+                              editingName.projectId === project.id;
+
+                            return (
+                              <div key={project.id}>
+                                <div
+                                  className={`tree-row tree-row-project tree-row-with-toggle${isProjSelected && selectionLevel === "project" ? " is-selected" : ""}${isWorkspaceActive && campaignDropProjectId === project.id ? " is-drop-target" : ""}`}
+                                  onClick={(e) => {
+                                    const campaign = project.campaigns[0];
+                                    activateWorkspaceSelection(
+                                      workspace.id,
+                                      {
+                                        clientId: client.id,
+                                        projectId: project.id,
+                                        campaignId: campaign?.id ?? "",
+                                      },
+                                      "project"
+                                    );
+                                    if ((e.target as HTMLElement).closest(".tree-no-toggle")) return;
+                                    toggleProject(project.id, workspace.id);
+                                  }}
+                                  onDoubleClick={() => {
+                                    if (!isWorkspaceActive) return;
+                                    beginProjectEdit(client.id, project.id, project.name);
+                                  }}
+                                  onDragOver={(e) => {
+                                    if (!isWorkspaceActive) return;
+                                    onProjectCampaignDragOver(e, project.id);
+                                  }}
+                                  onDragEnter={(e) => {
+                                    if (!isWorkspaceActive) return;
+                                    onProjectCampaignDragOver(e, project.id);
+                                  }}
+                                  onDragLeave={() => {
+                                    if (!isWorkspaceActive) return;
+                                    if (campaignDropProjectId === project.id) {
+                                      setCampaignDropProjectId(null);
+                                    }
+                                  }}
+                                  onDrop={(e) => {
+                                    if (!isWorkspaceActive) return;
+                                    onProjectCampaignDrop(e, client.id, project.id);
+                                  }}
+                                >
+                                  {isEditingProj ? (
+                                    <input
+                                      autoFocus
+                                      className="tree-inline-input"
+                                      value={editingName!.value}
+                                      onChange={(e) =>
+                                        setEditingName({ ...editingName!, value: e.target.value })
+                                      }
+                                      onBlur={commitEdit}
+                                      onKeyDown={onEditKey}
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                  ) : (
+                                    <span className="tree-label tree-label-project tree-no-toggle">
+                                      {project.name}
+                                    </span>
+                                  )}
+
+                                  <button
+                                    className="tree-toggle tree-toggle-end"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      toggleProject(project.id, workspace.id);
+                                    }}
+                                    tabIndex={-1}
+                                  >
+                                    <IconChevron open={isProjExpanded} />
+                                  </button>
+                                </div>
+
+                                <div
+                                  className={`tree-project-children${isProjExpanded ? " is-open" : ""}`}
+                                >
+                                  <div className="tree-project-children-inner">
+                                    {project.campaigns.map((campaign) => {
+                                      const isCampSelected =
+                                        isProjSelected && selection.campaignId === campaign.id;
+                                      const isEditingCamp =
+                                        isWorkspaceActive &&
+                                        editingName?.kind === "campaign" &&
+                                        editingName.campaignId === campaign.id;
+
+                                      return (
+                                        <div
+                                          key={campaign.id}
+                                          className={`tree-row tree-row-campaign${isCampSelected && selectionLevel === "campaign" ? " is-selected" : ""}${isWorkspaceActive && draggingCampaignId === campaign.id ? " is-dragging" : ""}`}
+                                          onClick={() =>
+                                            activateWorkspaceSelection(
+                                              workspace.id,
+                                              {
+                                                clientId: client.id,
+                                                projectId: project.id,
+                                                campaignId: campaign.id,
+                                              },
+                                              "campaign"
+                                            )
+                                          }
+                                          onDoubleClick={() => {
+                                            if (!isWorkspaceActive) return;
+                                            beginCampaignEdit(
+                                              client.id,
+                                              project.id,
+                                              campaign.id,
+                                              campaign.name
+                                            );
+                                          }}
+                                          draggable={isWorkspaceActive && !isEditingCamp}
+                                          onDragStart={(e) => {
+                                            if (!isWorkspaceActive) return;
+                                            onCampaignDragStart(e, {
+                                              campaignId: campaign.id,
+                                              sourceClientId: client.id,
+                                              sourceProjectId: project.id,
+                                            });
+                                          }}
+                                          onDragEnd={() => {
+                                            if (!isWorkspaceActive) return;
+                                            onCampaignDragEnd();
+                                          }}
+                                        >
+                                          {isEditingCamp ? (
+                                            <input
+                                              autoFocus
+                                              className="tree-inline-input"
+                                              value={editingName!.value}
+                                              onChange={(e) =>
+                                                setEditingName({
+                                                  ...editingName!,
+                                                  value: e.target.value,
+                                                })
+                                              }
+                                              onBlur={commitEdit}
+                                              onKeyDown={onEditKey}
+                                              onClick={(e) => e.stopPropagation()}
+                                            />
+                                          ) : (
+                                            <span className="tree-campaign-main">
+                                              <span className="tree-label tree-label-campaign">
+                                                {campaign.name}
+                                              </span>
+                                              <span className="platform-pill">
+                                                {platformTreeBadge(campaign.platform)}
+                                              </span>
+                                            </span>
+                                          )}
+
+                                          {isWorkspaceActive && (
+                                            <div
+                                              className="row-actions"
+                                              onClick={(e) => e.stopPropagation()}
+                                            >
+                                              <button
+                                                className="row-act-btn"
+                                                title="Duplicate ad"
+                                                onClick={() =>
+                                                  duplicateCampaign(
+                                                    client.id,
+                                                    project.id,
+                                                    campaign.id
+                                                  )
+                                                }
+                                              >
+                                                <IconDuplicate />
+                                              </button>
+                                              <button
+                                                className="row-act-btn is-danger"
+                                                title="Delete ad"
+                                                onClick={() =>
+                                                  deleteCampaign(
+                                                    client.id,
+                                                    project.id,
+                                                    campaign.id
+                                                  )
+                                                }
+                                              >
+                                                <IconTrash />
+                                              </button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+
+                                    {isWorkspaceActive && (
+                                      <button
+                                        className="tree-add-row tree-add-row-campaign"
+                                        onClick={() => addCampaign(client.id, project.id)}
+                                      >
+                                        <IconPlus /> New Ad
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+
+                          {isWorkspaceActive && (
+                            <button
+                              className="tree-add-row tree-add-row-project"
+                              onClick={() => addProject(client.id)}
+                            >
+                              <IconPlus /> New Project
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        </div>
+      );
+    };
 
     return (
       <>
@@ -3240,304 +3970,33 @@ export default function WorkspaceEditorApp() {
           <span className="pane-header-title">Workspaces</span>
         </div>
 
-        <div style={{ padding: "8px 12px 10px", borderBottom: "1px solid var(--line)" }}>
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              color: "var(--ink-3)",
-              marginBottom: 6,
-            }}
-          >
-            Local
-          </div>
-          <button
-            className={`ws-dropdown-item${localWorkspace.id === activeWorkspaceId ? " is-active" : ""}`}
-            style={{ width: "100%" }}
-            onClick={() => switchWorkspace(localWorkspace.id)}
-          >
-            <IconWorkspace />
-            <span>{localWorkspace.name}</span>
-            {localWorkspace.id === activeWorkspaceId && <span className="ws-check">✓</span>}
-          </button>
-
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              color: "var(--ink-3)",
-              marginTop: 10,
-              marginBottom: 6,
-            }}
-          >
-            Shared
-          </div>
-          {sharedWorkspaces.length === 0 ? (
-            <div style={{ fontSize: 12, color: "var(--ink-3)", padding: "4px 2px" }}>
-              {cloudEnabled ? "No shared workspaces yet" : "Enable Supabase to use shared workspaces"}
-            </div>
-          ) : (
-            sharedWorkspaces.map((ws) => (
-              <button
-                key={ws.id}
-                className={`ws-dropdown-item${ws.id === activeWorkspaceId ? " is-active" : ""}`}
-                style={{ width: "100%" }}
-                onClick={() => switchWorkspace(ws.id)}
-              >
-                <IconWorkspace />
-                <span>{ws.name}</span>
-                {ws.id === activeWorkspaceId && <span className="ws-check">✓</span>}
-              </button>
-            ))
-          )}
-          {cloudEnabled && authUser && (
-            <button
-              className="ws-dropdown-item ws-dropdown-new"
-              style={{ width: "100%", marginTop: 6 }}
-              onClick={createWorkspace}
-            >
-              <IconPlus />
-              <span>New Cloud Workspace</span>
-            </button>
-          )}
-        </div>
-
         <div className="pane-body">
-          {!hasClients ? (
-            <div className="empty-state">
-              <div className="empty-icon">
-                <IconUser />
+          <div className="tree">
+            <div className="tree-workspace-group-label">Local</div>
+            {renderWorkspaceNode(localWorkspaceGroup)}
+
+            <div className="tree-workspace-group-label tree-workspace-group-label-shared">
+              Shared
+            </div>
+            {sharedWorkspaces.length === 0 ? (
+              <div className="tree-workspace-meta" style={{ marginBottom: 8 }}>
+                {cloudEnabled
+                  ? "No shared workspaces yet"
+                  : "Enable Supabase to use shared workspaces"}
               </div>
-              <h3>No clients yet</h3>
-              <p>Add your first client to get started</p>
-            </div>
-          ) : (
-            <div className="tree">
-              {data.clients.map((client) => {
-                const isClientSelected = selection.clientId === client.id;
-                const isClientExpanded = expandedClients[clientExpandKey(client.id)] !== false;
-                const isEditingClient =
-                  editingName?.kind === "client" && editingName.clientId === client.id;
-
-                return (
-                  <div key={client.id} className="tree-section">
-                    {/* Client row */}
-                    <div
-                      className={`tree-row tree-row-client tree-row-with-toggle${isClientSelected && selectionLevel === "client" ? " is-selected" : ""}`}
-                      onClick={(e) => {
-                        selectClient(client.id);
-                        if ((e.target as HTMLElement).closest(".tree-no-toggle")) return;
-                        toggleClient(client.id);
-                      }}
-                      onDoubleClick={() => beginClientEdit(client.id, client.name)}
-                    >
-                      {isEditingClient ? (
-                        <input
-                          autoFocus
-                          className="tree-inline-input"
-                          value={editingName!.value}
-                          onChange={(e) =>
-                            setEditingName({ ...editingName!, value: e.target.value })
-                          }
-                          onBlur={commitEdit}
-                          onKeyDown={onEditKey}
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                      ) : (
-                        <span className="tree-label tree-label-client tree-no-toggle">
-                          {client.name}
-                        </span>
-                      )}
-
-                      <button
-                        className="tree-toggle tree-toggle-end"
-                        onClick={(e) => { e.stopPropagation(); toggleClient(client.id); }}
-                        tabIndex={-1}
-                      >
-                        <IconChevron open={isClientExpanded} />
-                      </button>
-
-                    </div>
-
-                    {/* Projects */}
-                    <div className={`tree-client-children${isClientExpanded ? " is-open" : ""}`}>
-                      <div className="tree-client-children-inner">
-                        {client.projects.map((project) => {
-                          const isProjSelected =
-                            isClientSelected && selection.projectId === project.id;
-                          const isProjExpanded = expandedProjects[projectExpandKey(project.id)] !== false;
-                          const isEditingProj =
-                            editingName?.kind === "project" &&
-                            editingName.projectId === project.id;
-
-                          return (
-                            <div key={project.id}>
-                              {/* Project row */}
-                              <div
-                                className={`tree-row tree-row-project tree-row-with-toggle${isProjSelected && selectionLevel === "project" ? " is-selected" : ""}${campaignDropProjectId === project.id ? " is-drop-target" : ""}`}
-                                onClick={(e) => {
-                                  selectProject(client.id, project.id);
-                                  if ((e.target as HTMLElement).closest(".tree-no-toggle")) return;
-                                  toggleProject(project.id);
-                                }}
-                                onDoubleClick={() =>
-                                  beginProjectEdit(client.id, project.id, project.name)
-                                }
-                                onDragOver={(e) => onProjectCampaignDragOver(e, project.id)}
-                                onDragEnter={(e) => onProjectCampaignDragOver(e, project.id)}
-                                onDragLeave={() => {
-                                  if (campaignDropProjectId === project.id) {
-                                    setCampaignDropProjectId(null);
-                                  }
-                                }}
-                                onDrop={(e) => onProjectCampaignDrop(e, client.id, project.id)}
-                              >
-                                {isEditingProj ? (
-                                  <input
-                                    autoFocus
-                                    className="tree-inline-input"
-                                    value={editingName!.value}
-                                    onChange={(e) =>
-                                      setEditingName({ ...editingName!, value: e.target.value })
-                                    }
-                                    onBlur={commitEdit}
-                                    onKeyDown={onEditKey}
-                                    onClick={(e) => e.stopPropagation()}
-                                  />
-                                ) : (
-                                  <span className="tree-label tree-label-project tree-no-toggle">
-                                    {project.name}
-                                  </span>
-                                )}
-
-                                <button
-                                  className="tree-toggle tree-toggle-end"
-                                  onClick={(e) => { e.stopPropagation(); toggleProject(project.id); }}
-                                  tabIndex={-1}
-                                >
-                                  <IconChevron open={isProjExpanded} />
-                                </button>
-
-                              </div>
-
-                              {/* Campaigns */}
-                              <div
-                                className={`tree-project-children${isProjExpanded ? " is-open" : ""}`}
-                              >
-                                <div className="tree-project-children-inner">
-                                  {project.campaigns.map((campaign) => {
-                                    const isCampSelected =
-                                      isProjSelected && selection.campaignId === campaign.id;
-                                    const isEditingCamp =
-                                      editingName?.kind === "campaign" &&
-                                      editingName.campaignId === campaign.id;
-
-                                    return (
-                                      <div
-                                        key={campaign.id}
-                                        className={`tree-row tree-row-campaign${isCampSelected && selectionLevel === "campaign" ? " is-selected" : ""}${draggingCampaignId === campaign.id ? " is-dragging" : ""}`}
-                                        onClick={() =>
-                                          selectCampaign(client.id, project.id, campaign.id)
-                                        }
-                                        onDoubleClick={() =>
-                                          beginCampaignEdit(
-                                            client.id,
-                                            project.id,
-                                            campaign.id,
-                                            campaign.name
-                                          )
-                                        }
-                                        draggable={!isEditingCamp}
-                                        onDragStart={(e) =>
-                                          onCampaignDragStart(e, {
-                                            campaignId: campaign.id,
-                                            sourceClientId: client.id,
-                                            sourceProjectId: project.id,
-                                          })
-                                        }
-                                        onDragEnd={onCampaignDragEnd}
-                                      >
-                                        {isEditingCamp ? (
-                                          <input
-                                            autoFocus
-                                            className="tree-inline-input"
-                                            value={editingName!.value}
-                                            onChange={(e) =>
-                                              setEditingName({ ...editingName!, value: e.target.value })
-                                            }
-                                            onBlur={commitEdit}
-                                            onKeyDown={onEditKey}
-                                            onClick={(e) => e.stopPropagation()}
-                                          />
-                                        ) : (
-                                          <span className="tree-campaign-main">
-                                            <span className="tree-label tree-label-campaign">
-                                              {campaign.name}
-                                            </span>
-                                            <span className="platform-pill">
-                                              {platformTreeBadge(campaign.platform)}
-                                            </span>
-                                          </span>
-                                        )}
-
-                                        <div
-                                          className="row-actions"
-                                          onClick={(e) => e.stopPropagation()}
-                                        >
-                                          <button
-                                            className="row-act-btn"
-                                            title="Duplicate ad"
-                                            onClick={() =>
-                                              duplicateCampaign(client.id, project.id, campaign.id)
-                                            }
-                                          >
-                                            <IconDuplicate />
-                                          </button>
-                                          <button
-                                            className="row-act-btn is-danger"
-                                            title="Delete ad"
-                                            onClick={() =>
-                                              deleteCampaign(client.id, project.id, campaign.id)
-                                            }
-                                          >
-                                            <IconTrash />
-                                          </button>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-
-                                  {/* Add campaign */}
-                                  <button
-                                    className="tree-add-row tree-add-row-campaign"
-                                    onClick={() => addCampaign(client.id, project.id)}
-                                  >
-                                    <IconPlus /> New Ad
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-
-                        {/* Add project */}
-                        <button
-                          className="tree-add-row tree-add-row-project"
-                          onClick={() => addProject(client.id)}
-                        >
-                          <IconPlus /> New Project
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+            ) : (
+              sharedWorkspaces.map((workspace) => renderWorkspaceNode(workspace))
+            )}
+            {cloudEnabled && authUser && (
+              <button
+                className="tree-add-row"
+                style={{ marginTop: 6 }}
+                onClick={createWorkspace}
+              >
+                <IconPlus /> New Cloud Workspace
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="sidebar-footer">
@@ -3550,6 +4009,200 @@ export default function WorkspaceEditorApp() {
           </button>
         </div>
       </>
+    );
+  }
+
+  // ── Workspace View (middle pane) ───────────────────────────────
+
+  function renderWorkspaceView() {
+    const counts = countWorkspaceEntities(data);
+    const isLocalWorkspace = activeWorkspace.kind === "local";
+    const updatedLabel = workspaceStorageEstimate
+      ? new Date(workspaceStorageEstimate.generatedAtIso).toLocaleTimeString()
+      : "—";
+
+    return (
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          height: "100%",
+          overflow: "hidden",
+        }}
+      >
+        <div className="context-header">
+          <div className="context-header-eyebrow">Workspace Settings</div>
+          <div className="context-header-title">{activeWorkspace.name}</div>
+          <div className="context-header-meta">
+            {isLocalWorkspace
+              ? "Manage local workspace diagnostics and browser storage."
+              : "Manage workspace-level settings and diagnostics."}
+          </div>
+        </div>
+
+        <div className="form-section" style={{ overflowY: "auto" }}>
+          {isLocalWorkspace ? (
+            <>
+              <div className="form-group">
+                <label className="form-label">Workspace Name</label>
+                <input
+                  className="form-input"
+                  value={workspaceNameFieldDraft}
+                  onChange={(e) => setWorkspaceNameFieldDraft(e.target.value)}
+                  onBlur={commitWorkspaceNameField}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      commitWorkspaceNameField();
+                    } else if (e.key === "Escape") {
+                      e.preventDefault();
+                      setWorkspaceNameFieldDraft(localWorkspace.name);
+                    }
+                  }}
+                  placeholder={DEFAULT_LOCAL_WORKSPACE_NAME}
+                />
+              </div>
+              <div className="info-stat-block" style={{ gap: 10 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 10,
+                  }}
+                >
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>
+                    Browser Storage (Estimate)
+                  </div>
+                  <button
+                    className="btn btn-secondary btn-xs"
+                    onClick={() => void refreshWorkspaceStorageEstimate()}
+                    disabled={workspaceStorageLoading}
+                  >
+                    {workspaceStorageLoading ? "Refreshing..." : "Refresh"}
+                  </button>
+                </div>
+
+                <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                  Usage is per browser profile for this site, not per individual project.
+                  Updated: {updatedLabel}
+                </div>
+
+                {workspaceStorageError && (
+                  <div style={{ fontSize: 12, color: "var(--danger)" }}>
+                    {workspaceStorageError}
+                  </div>
+                )}
+
+                {!workspaceStorageError && workspaceStorageEstimate && (
+                  <>
+                    <div className="info-stat-grid">
+                      <div className="info-stat-block" style={{ padding: 12 }}>
+                        <div className="info-stat-label">Used</div>
+                        <div style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)" }}>
+                          {formatBytes(workspaceStorageEstimate.usage)}
+                        </div>
+                      </div>
+                      <div className="info-stat-block" style={{ padding: 12 }}>
+                        <div className="info-stat-label">Free</div>
+                        <div style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)" }}>
+                          {formatBytes(workspaceStorageEstimate.free)}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="info-stat-block" style={{ padding: 12, gap: 8 }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 12,
+                        }}
+                      >
+                        <span className="info-stat-label">Total quota</span>
+                        <strong style={{ color: "var(--ink)" }}>
+                          {formatBytes(workspaceStorageEstimate.quota)}
+                        </strong>
+                      </div>
+                      <div
+                        style={{
+                          width: "100%",
+                          height: 8,
+                          borderRadius: 999,
+                          background: "var(--bg)",
+                          overflow: "hidden",
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: `${workspaceStorageEstimate.usagePct.toFixed(1)}%`,
+                            height: "100%",
+                            background: "var(--accent)",
+                          }}
+                        />
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 12,
+                          fontSize: 12,
+                          color: "var(--muted)",
+                        }}
+                      >
+                        <span>{workspaceStorageEstimate.usagePct.toFixed(1)}% used</span>
+                        <span>
+                          Persistent storage:{" "}
+                          {workspaceStorageEstimate.persisted == null
+                            ? "unknown"
+                            : workspaceStorageEstimate.persisted
+                              ? "enabled"
+                              : "not granted"}
+                        </span>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {!workspaceStorageError &&
+                  !workspaceStorageEstimate &&
+                  !workspaceStorageLoading && (
+                    <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                      No estimate available yet.
+                    </div>
+                  )}
+              </div>
+            </>
+          ) : (
+            <div className="info-stat-block">
+              <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>
+                Cloud Workspace
+              </div>
+              <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                Browser storage estimates are shown for the Local Workspace. Cloud
+                workspace storage and quotas are managed by Supabase.
+              </div>
+            </div>
+          )}
+
+          <div className="info-stat-grid">
+            <div className="info-stat-block">
+              <div className="info-stat-value">{counts.clients}</div>
+              <div className="info-stat-label">Clients</div>
+            </div>
+            <div className="info-stat-block">
+              <div className="info-stat-value">{counts.projects}</div>
+              <div className="info-stat-label">Projects</div>
+            </div>
+            <div className="info-stat-block">
+              <div className="info-stat-value">{counts.campaigns}</div>
+              <div className="info-stat-label">Ads</div>
+            </div>
+          </div>
+        </div>
+      </div>
     );
   }
 
@@ -4699,6 +5352,21 @@ export default function WorkspaceEditorApp() {
   // ── Info Pane (right, when client/project selected) ─────────────
 
   function renderInfoPane() {
+    if (selectionLevel === "workspace") {
+      return (
+        <div className="info-pane">
+          <div className="info-stat-block">
+            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>
+              Workspace selected
+            </div>
+            <div style={{ fontSize: 12, color: "var(--muted)" }}>
+              Workspace settings are shown in the middle pane.
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     if (!selectedClient) {
       return (
         <div className="empty-state">
@@ -5083,7 +5751,7 @@ export default function WorkspaceEditorApp() {
           <button
             className="btn btn-export"
             onClick={() => setExportPanelOpen(true)}
-            disabled={!selectedClient}
+            disabled={!selectedClient || selectionLevel === "workspace"}
           >
             Export ↑
           </button>
@@ -5164,6 +5832,8 @@ export default function WorkspaceEditorApp() {
         >
           {selectionLevel === "client"
             ? renderClientView()
+            : selectionLevel === "workspace"
+            ? renderWorkspaceView()
             : selectionLevel === "project"
             ? renderProjectView()
             : renderCampaignEditor()}

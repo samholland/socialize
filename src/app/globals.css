@@ -481,6 +481,24 @@ html, body {
   border-bottom: none;
 }
 
+.tree-workspace-section {
+  margin-bottom: 4px;
+}
+
+.tree-workspace-group-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding: 2px 6px;
+  margin-bottom: 4px;
+}
+
+.tree-workspace-group-label-shared {
+  margin-top: 10px;
+}
+
 .tree-row {
   display: flex;
   align-items: center;
@@ -513,6 +531,19 @@ html, body {
 .tree-row-project {
   border-bottom: 1px solid var(--line);
   border-radius: 0;
+}
+
+.tree-row-workspace {
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  min-height: 34px;
+  padding: 7px 10px;
+  background: var(--pane);
+}
+
+.tree-label-workspace {
+  font-size: 13.5px;
+  font-weight: 600;
 }
 
 .tree-row-project,
@@ -551,6 +582,39 @@ html, body {
   opacity: 0;
   pointer-events: none;
   transition: grid-template-rows 220ms ease, opacity 180ms ease;
+}
+
+.tree-workspace-children {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  pointer-events: none;
+  transition: grid-template-rows 220ms ease, opacity 180ms ease;
+}
+
+.tree-workspace-children.is-open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.tree-workspace-children-inner {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.tree-workspace-meta {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 6px 10px;
+}
+
+.tree-workspace-meta-error {
+  color: var(--danger);
 }
 
 .tree-project-children.is-open {
@@ -641,7 +705,7 @@ html, body {
 }
 
 .tree-label-project {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -2066,6 +2130,24 @@ html, body {
 .ws-dropdown-item.is-active {
   color: var(--accent);
   font-weight: 600;
+}
+
+.ws-inline-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  border-bottom: 1px solid var(--accent);
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 0;
+  outline: none;
+}
+
+.ws-inline-input::placeholder {
+  color: var(--muted);
 }
 
 .ws-check {
