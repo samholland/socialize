@@ -4,21 +4,25 @@ import { useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 type AuthMode = "sign_in" | "sign_up" | "reset";
+type GateState = "auth" | "loading" | "missing_config";
 
 type AuthGateProps = {
-  supabase: SupabaseClient;
+  supabase?: SupabaseClient | null;
+  state?: GateState;
 };
 
-export function AuthGate({ supabase }: AuthGateProps) {
+export function AuthGate({ supabase, state = "auth" }: AuthGateProps) {
   const [mode, setMode] = useState<AuthMode>("sign_in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const authEnabled = state === "auth" && Boolean(supabase);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!supabase) return;
     setPending(true);
     setError(null);
     setNotice(null);
@@ -50,112 +54,136 @@ export function AuthGate({ supabase }: AuthGateProps) {
     }
   }
 
+  let statusTitle = "";
+  let statusBody = "";
+  if (state === "loading") {
+    statusTitle = "Loading account";
+    statusBody = "Checking your saved session and preparing your workspace.";
+  } else if (state === "missing_config") {
+    statusTitle = "Supabase not configured";
+    statusBody =
+      "Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to enable sign in.";
+  } else if (!supabase) {
+    statusTitle = "Authentication unavailable";
+    statusBody = "Supabase client is not available.";
+  }
+
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "grid",
-        placeItems: "center",
-        background: "var(--bg)",
-        padding: 24,
-      }}
-    >
-      <form
-        onSubmit={onSubmit}
-        style={{
-          width: "100%",
-          maxWidth: 420,
-          background: "var(--pane)",
-          border: "1px solid var(--line)",
-          borderRadius: 14,
-          padding: 20,
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
-        }}
-      >
-        <h1 style={{ fontSize: 22, lineHeight: 1.2 }}>Sign in to Socialize</h1>
-        <p style={{ color: "var(--ink-3)", fontSize: 13 }}>
-          Your workspace data is now cloud-backed and account-scoped.
-        </p>
+    <div className="splash-root">
+      <div className="splash-shell">
+        <section className="splash-hero">
+          <div className="splash-brand">Socialize</div>
+          <h1 className="splash-title">Design, preview, and export social ads in one workspace.</h1>
+          <p className="splash-subtitle">
+            Build campaign variants across Feed, Stories, Reels, and Facebook with export-first rendering.
+          </p>
+          <div className="splash-points">
+            <div className="splash-point">
+              <span className="splash-point-dot" />
+              Canvas-based previews aligned with exports
+            </div>
+            <div className="splash-point">
+              <span className="splash-point-dot" />
+              Local workspace + optional shared cloud workspaces
+            </div>
+            <div className="splash-point">
+              <span className="splash-point-dot" />
+              Private media uploads with signed URL access
+            </div>
+          </div>
+        </section>
 
-        <label className="form-label">Email</label>
-        <input
-          className="form-input"
-          type="email"
-          autoComplete="email"
-          required
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
+        <section className="splash-auth-card">
+          {authEnabled ? (
+            <form onSubmit={onSubmit} className="splash-auth-form">
+              <div>
+                <h2 className="splash-auth-title">Sign in to your workspace</h2>
+                <p className="splash-auth-subtitle">
+                  Use email and password to continue.
+                </p>
+              </div>
 
-        {mode !== "reset" && (
-          <>
-            <label className="form-label">Password</label>
-            <input
-              className="form-input"
-              type="password"
-              autoComplete={mode === "sign_up" ? "new-password" : "current-password"}
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </>
-        )}
+              <label className="form-label">Email</label>
+              <input
+                className="form-input"
+                type="email"
+                autoComplete="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
 
-        {error && (
-          <p style={{ color: "#b42318", fontSize: 12 }}>{error}</p>
-        )}
-        {notice && (
-          <p style={{ color: "#16794d", fontSize: 12 }}>{notice}</p>
-        )}
+              {mode !== "reset" && (
+                <>
+                  <label className="form-label">Password</label>
+                  <input
+                    className="form-input"
+                    type="password"
+                    autoComplete={mode === "sign_up" ? "new-password" : "current-password"}
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                </>
+              )}
 
-        <button className="btn btn-primary" disabled={pending} type="submit">
-          {pending
-            ? "Please wait..."
-            : mode === "sign_in"
-              ? "Sign In"
-              : mode === "sign_up"
-                ? "Create Account"
-                : "Send Reset Link"}
-        </button>
+              {error && <p className="splash-auth-error">{error}</p>}
+              {notice && <p className="splash-auth-notice">{notice}</p>}
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={() => {
-              setMode("sign_in");
-              setError(null);
-              setNotice(null);
-            }}
-          >
-            Sign In
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={() => {
-              setMode("sign_up");
-              setError(null);
-              setNotice(null);
-            }}
-          >
-            Create Account
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={() => {
-              setMode("reset");
-              setError(null);
-              setNotice(null);
-            }}
-          >
-            Reset Password
-          </button>
-        </div>
-      </form>
+              <button className="btn btn-primary" disabled={pending} type="submit">
+                {pending
+                  ? "Please wait..."
+                  : mode === "sign_in"
+                    ? "Sign In"
+                    : mode === "sign_up"
+                      ? "Create Account"
+                      : "Send Reset Link"}
+              </button>
+
+              <div className="splash-auth-actions">
+                <button
+                  type="button"
+                  className={`btn btn-sm ${mode === "sign_in" ? "btn-primary" : "btn-secondary"}`}
+                  onClick={() => {
+                    setMode("sign_in");
+                    setError(null);
+                    setNotice(null);
+                  }}
+                >
+                  Sign In
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${mode === "sign_up" ? "btn-primary" : "btn-secondary"}`}
+                  onClick={() => {
+                    setMode("sign_up");
+                    setError(null);
+                    setNotice(null);
+                  }}
+                >
+                  Create Account
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${mode === "reset" ? "btn-primary" : "btn-secondary"}`}
+                  onClick={() => {
+                    setMode("reset");
+                    setError(null);
+                    setNotice(null);
+                  }}
+                >
+                  Reset Password
+                </button>
+              </div>
+            </form>
+          ) : (
+            <div className="splash-status">
+              <h2 className="splash-auth-title">{statusTitle}</h2>
+              <p className="splash-auth-subtitle">{statusBody}</p>
+            </div>
+          )}
+        </section>
+      </div>
     </div>
   );
 }
