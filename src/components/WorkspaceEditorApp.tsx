@@ -770,6 +770,28 @@ function presenceLabelFromEmail(email: string | null | undefined): string {
   return normalized.slice(0, atIndex);
 }
 
+function defaultProfileDisplayName(email: string | null | undefined): string {
+  if (!email) return "User";
+  const atIndex = email.indexOf("@");
+  const localPart = (atIndex > 0 ? email.slice(0, atIndex) : email).trim();
+  return localPart || "User";
+}
+
+function normalizeProfileSettingsErrorMessage(error: unknown): string {
+  const message =
+    error instanceof Error && error.message
+      ? error.message
+      : "Unable to load profile settings.";
+  const lower = message.toLowerCase();
+  if (
+    (lower.includes("profiles") && lower.includes("display_name")) ||
+    (lower.includes("profiles") && lower.includes("profile_image_data_url"))
+  ) {
+    return "Profile settings migration is missing. Run 20260327_profile_settings_fields.sql and refresh.";
+  }
+  return message;
+}
+
 function loadWorkspaceDataFromLocalStorage(
   wsId: string
 ): { data: AppData; selection: Selection; level: SelectionLevel } {
@@ -941,7 +963,6 @@ function mergeImportedData(current: AppData, incoming: AppData): AppData {
 type UiPrefs = {
   panelWidths: [number, number];
   darkMode: boolean;
-  dragDropMode: DragDropMode;
   showIgFeedOverlay: boolean;
   igFeedOverlayOpacity: number;
   igFeedOverlayScale: number;
@@ -1007,7 +1028,6 @@ function loadUiPrefs(): UiPrefs {
   const fallback: UiPrefs = {
     panelWidths: [260, 420],
     darkMode: false,
-    dragDropMode: "move",
     showIgFeedOverlay: false,
     igFeedOverlayOpacity: 0.4,
     igFeedOverlayScale: 1,
@@ -1028,7 +1048,6 @@ function loadUiPrefs(): UiPrefs {
     const parsed = JSON.parse(raw) as {
       panelWidths?: [number, number];
       darkMode?: boolean;
-      dragDropMode?: DragDropMode;
       showIgFeedOverlay?: boolean;
       igFeedOverlayOpacity?: number;
       igFeedOverlayScale?: number;
@@ -1064,7 +1083,6 @@ function loadUiPrefs(): UiPrefs {
     return {
       panelWidths: Array.isArray(parsed.panelWidths) ? parsed.panelWidths : [260, 420],
       darkMode: typeof parsed.darkMode === "boolean" ? parsed.darkMode : false,
-      dragDropMode: parsed.dragDropMode === "copy" ? "copy" : "move",
       showIgFeedOverlay:
         typeof parsed.showIgFeedOverlay === "boolean"
           ? parsed.showIgFeedOverlay
@@ -1394,14 +1412,13 @@ export default function WorkspaceEditorApp() {
 
   // Dark mode
   const [darkMode, setDarkMode] = useState(false);
-  const [dragDropMode, setDragDropMode] = useState<DragDropMode>("move");
+  const [optionCopyMode, setOptionCopyMode] = useState(false);
 
   // Load UI prefs after mount (avoids SSR/client hydration mismatch)
   useEffect(() => {
     const ui = loadUiPrefs();
     setPanelWidths(ui.panelWidths);
     setDarkMode(ui.darkMode);
-    setDragDropMode(ui.dragDropMode);
     setShowIgFeedOverlay(ui.showIgFeedOverlay);
     setIgFeedOverlayOpacity(ui.igFeedOverlayOpacity);
     setIgFeedOverlayScale(ui.igFeedOverlayScale);
@@ -1492,6 +1509,7 @@ export default function WorkspaceEditorApp() {
       setStorageReady(false);
       setCloudHydrated(false);
       setShowImportPrompt(false);
+      setShowUserSettings(false);
       setWorkspaceSyncConflicts({});
       cloudWorkspaceDataSignatureRef.current = {};
       setWorkspaces([localWorkspaceEntry]);
@@ -1599,6 +1617,14 @@ export default function WorkspaceEditorApp() {
   const [workspaceInviteEmailDraft, setWorkspaceInviteEmailDraft] = useState("");
   const [workspaceInviteRoleDraft, setWorkspaceInviteRoleDraft] =
     useState<WorkspaceInviteRole>("member");
+  const [showUserSettings, setShowUserSettings] = useState(false);
+  const [profileDisplayNameSaved, setProfileDisplayNameSaved] = useState("");
+  const [profileDisplayNameDraft, setProfileDisplayNameDraft] = useState("");
+  const [profileImageDataUrlSaved, setProfileImageDataUrlSaved] = useState<string | null>(null);
+  const [profileImageDataUrl, setProfileImageDataUrl] = useState<string | null>(null);
+  const [profileSettingsLoading, setProfileSettingsLoading] = useState(false);
+  const [profileSettingsSaving, setProfileSettingsSaving] = useState(false);
+  const [profileSettingsError, setProfileSettingsError] = useState<string | null>(null);
   const [workspaceInvitesByWorkspace, setWorkspaceInvitesByWorkspace] = useState<
     Record<string, CloudWorkspaceInvite[]>
   >({});
@@ -1710,6 +1736,9 @@ export default function WorkspaceEditorApp() {
   const activeWorkspaceIsLocal = activeWorkspace.kind === "local";
   const activeWorkspaceRevision =
     typeof activeWorkspace.revision === "number" ? activeWorkspace.revision : 0;
+  const effectiveProfileDisplayName =
+    profileDisplayNameSaved.trim() ||
+    defaultProfileDisplayName(authUser?.email ?? null);
 
   function setWorkspaceRevision(workspaceId: string, revision: number) {
     const normalized = Math.max(0, Math.floor(revision));
@@ -1797,6 +1826,7 @@ export default function WorkspaceEditorApp() {
       return;
     }
     void refreshIncomingWorkspaceInviteList();
+    void refreshUserProfileSettings();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cloudEnabled, supabase, authUser?.id]);
 
@@ -1922,6 +1952,92 @@ export default function WorkspaceEditorApp() {
     const nextName = normalized ?? activeWorkspace.name;
     setWorkspaceNameFieldDraft(nextName);
     setWorkspaceRenameDraft(nextName);
+  }
+
+  async function refreshUserProfileSettings() {
+    if (!cloudEnabled || !supabase || !authUser) {
+      setProfileDisplayNameSaved("");
+      setProfileDisplayNameDraft("");
+      setProfileImageDataUrlSaved(null);
+      setProfileImageDataUrl(null);
+      setProfileSettingsError(null);
+      setProfileSettingsLoading(false);
+      return;
+    }
+
+    setProfileSettingsLoading(true);
+    setProfileSettingsError(null);
+    try {
+      const { data: profileRow, error } = await supabase
+        .from("profiles")
+        .select("email,display_name,profile_image_data_url")
+        .eq("user_id", authUser.id)
+        .maybeSingle();
+      if (error) throw error;
+
+      const displayName =
+        typeof profileRow?.display_name === "string" ? profileRow.display_name.trim() : "";
+      const nextImage =
+        typeof profileRow?.profile_image_data_url === "string"
+          ? profileRow.profile_image_data_url
+          : null;
+      setProfileDisplayNameSaved(displayName);
+      setProfileDisplayNameDraft(displayName);
+      setProfileImageDataUrlSaved(nextImage);
+      setProfileImageDataUrl(nextImage);
+    } catch (error) {
+      console.warn("Failed to load profile settings", error);
+      setProfileSettingsError(normalizeProfileSettingsErrorMessage(error));
+      const fallback = defaultProfileDisplayName(authUser.email ?? null);
+      setProfileDisplayNameSaved(fallback);
+      setProfileDisplayNameDraft(fallback);
+      setProfileImageDataUrlSaved(null);
+      setProfileImageDataUrl(null);
+    } finally {
+      setProfileSettingsLoading(false);
+    }
+  }
+
+  async function saveUserProfileSettings() {
+    if (!cloudEnabled || !supabase || !authUser) return;
+    const normalizedDisplayName = profileDisplayNameDraft.trim();
+    setProfileSettingsSaving(true);
+    setProfileSettingsError(null);
+    try {
+      const { error } = await supabase.from("profiles").upsert(
+        {
+          user_id: authUser.id,
+          email: authUser.email ?? "",
+          display_name: normalizedDisplayName,
+          profile_image_data_url: profileImageDataUrl,
+        },
+        { onConflict: "user_id" }
+      );
+      if (error) throw error;
+      setProfileDisplayNameSaved(normalizedDisplayName);
+      setProfileDisplayNameDraft(normalizedDisplayName);
+      setProfileImageDataUrlSaved(profileImageDataUrl);
+    } catch (error) {
+      console.warn("Failed to save profile settings", error);
+      setProfileSettingsError(
+        error instanceof Error ? error.message : "Unable to save profile settings."
+      );
+    } finally {
+      setProfileSettingsSaving(false);
+    }
+  }
+
+  async function pickUserProfileImage(file: File) {
+    if (!file.type.startsWith("image/")) {
+      alert("Please choose an image file.");
+      return;
+    }
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      setProfileImageDataUrl(dataUrl);
+    } catch {
+      alert("Unable to read image file.");
+    }
   }
 
   async function refreshIncomingWorkspaceInviteList() {
@@ -2632,7 +2748,6 @@ export default function WorkspaceEditorApp() {
       JSON.stringify({
         panelWidths,
         darkMode,
-        dragDropMode,
         showIgFeedOverlay,
         igFeedOverlayOpacity,
         igFeedOverlayScale,
@@ -2651,7 +2766,6 @@ export default function WorkspaceEditorApp() {
     storageReady,
     panelWidths,
     darkMode,
-    dragDropMode,
     showIgFeedOverlay,
     igFeedOverlayOpacity,
     igFeedOverlayScale,
@@ -3697,6 +3811,7 @@ export default function WorkspaceEditorApp() {
     nextLevel?: SelectionLevel,
     nextSelection?: Selection
   ) {
+    setShowUserSettings(false);
     if (wsId === activeWorkspaceId) {
       if (nextSelection) setSelection(coerceSelection(data, nextSelection));
       if (nextLevel) setSelectionLevel(nextLevel);
@@ -3804,6 +3919,12 @@ export default function WorkspaceEditorApp() {
   function deleteActiveWorkspace() {
     if (activeWorkspace.kind === "local") {
       alert("The Local Workspace cannot be deleted.");
+      return;
+    }
+    if (activeWorkspace.kind === "personal") {
+      alert(
+        "Your personal cloud workspace cannot be deleted. Create and delete shared workspaces instead."
+      );
       return;
     }
     if (!cloudEnabled || !supabase || !authUser) return;
@@ -3921,6 +4042,7 @@ export default function WorkspaceEditorApp() {
   async function signOut() {
     if (!supabase) return;
     await supabase.auth.signOut();
+    setShowUserSettings(false);
     cloudWorkspaceDataSignatureRef.current = {};
     replaceCampaignMedia({});
     router.replace("/login");
@@ -4310,6 +4432,7 @@ export default function WorkspaceEditorApp() {
   // ── Tree navigation ────────────────────────────────────────────
 
   function selectClient(clientId: string) {
+    setShowUserSettings(false);
     const client = data.clients.find((c) => c.id === clientId);
     if (!client) return;
     const proj = client.projects[0];
@@ -4323,6 +4446,7 @@ export default function WorkspaceEditorApp() {
   }
 
   function selectProject(clientId: string, projectId: string) {
+    setShowUserSettings(false);
     const project = data.clients
       .find((c) => c.id === clientId)
       ?.projects.find((p) => p.id === projectId);
@@ -4336,6 +4460,7 @@ export default function WorkspaceEditorApp() {
   }
 
   function selectCampaign(clientId: string, projectId: string, campaignId: string) {
+    setShowUserSettings(false);
     setSelection({ clientId, projectId, campaignId });
     setSelectionLevel("campaign");
   }
@@ -4373,6 +4498,7 @@ export default function WorkspaceEditorApp() {
     sourceName: string;
     existingNames: string[];
     destinationLabel: string;
+    mode?: DragDropMode;
   }): string | null {
     const preferredName = args.sourceName.trim() || (args.entityLabel === "Project" ? "New Project" : "New Ad");
     const hasConflict = args.existingNames.some(
@@ -4380,12 +4506,16 @@ export default function WorkspaceEditorApp() {
     );
     if (!hasConflict) return preferredName;
     const renamed = uniqueNameWithCopySuffix(preferredName, args.existingNames);
-    const action = dragDropMode === "copy" ? "copy" : "move";
+    const action = (args.mode ?? dragDropMode) === "copy" ? "copy" : "move";
     const confirmed = window.confirm(
       `A ${args.entityLabel.toLowerCase()} named "${preferredName}" already exists in ${args.destinationLabel}. ${action === "copy" ? "Copy" : "Move"} it as "${renamed}"?`
     );
     if (!confirmed) return null;
     return renamed;
+  }
+
+  function dragDropModeFromDragEvent(event: React.DragEvent): DragDropMode {
+    return event.altKey ? "copy" : dragDropMode;
   }
 
   function readCampaignDragPayload(e: React.DragEvent): CampaignDragPayload | null {
@@ -4480,9 +4610,10 @@ export default function WorkspaceEditorApp() {
   ) {
     const payload = draggingProjectPayload ?? readProjectDragPayload(e);
     if (!payload) return;
-    if (payload.sourceWorkspaceId === targetWorkspaceId && dragDropMode === "move") return;
+    const mode = dragDropModeFromDragEvent(e);
+    if (payload.sourceWorkspaceId === targetWorkspaceId && mode === "move") return;
     e.preventDefault();
-    e.dataTransfer.dropEffect = dragDropMode === "copy" ? "copy" : "move";
+    e.dataTransfer.dropEffect = mode === "copy" ? "copy" : "move";
     setProjectDropWorkspaceId(targetWorkspaceId);
   }
 
@@ -4490,9 +4621,10 @@ export default function WorkspaceEditorApp() {
     sourceWorkspaceId: string,
     sourceClientId: string,
     sourceProjectId: string,
-    targetWorkspaceId: string
+    targetWorkspaceId: string,
+    mode: DragDropMode = dragDropMode
   ): Promise<void> {
-    const isCopyMode = dragDropMode === "copy";
+    const isCopyMode = mode === "copy";
     if (sourceWorkspaceId === targetWorkspaceId && !isCopyMode) return;
 
     const sourceData = await getWorkspaceDataForTransfer(sourceWorkspaceId);
@@ -4522,6 +4654,7 @@ export default function WorkspaceEditorApp() {
       destinationLabel: existingTargetClient
         ? `client "${existingTargetClient.name}"`
         : `new client "${sourceClient.name}"`,
+      mode,
     });
     if (!resolvedProjectName) return;
 
@@ -4766,11 +4899,13 @@ export default function WorkspaceEditorApp() {
     setProjectDropWorkspaceId(null);
     if (!payload) return;
     e.preventDefault();
+    const mode = dragDropModeFromDragEvent(e);
     await moveProjectAcrossWorkspaces(
       payload.sourceWorkspaceId,
       payload.sourceClientId,
       payload.sourceProjectId,
-      targetWorkspaceId
+      targetWorkspaceId,
+      mode
     );
   }
 
@@ -4788,7 +4923,8 @@ export default function WorkspaceEditorApp() {
       return;
     }
     e.preventDefault();
-    e.dataTransfer.dropEffect = dragDropMode === "copy" ? "copy" : "move";
+    const mode = dragDropModeFromDragEvent(e);
+    e.dataTransfer.dropEffect = mode === "copy" ? "copy" : "move";
     setCampaignDropCampaignTarget(null);
     setCampaignDropCampaignPosition("before");
     setCampaignDropTarget(campaignDropTargetKey(targetProjectId, targetWorkspaceId));
@@ -4915,7 +5051,8 @@ export default function WorkspaceEditorApp() {
     }
     e.preventDefault();
     e.stopPropagation();
-    e.dataTransfer.dropEffect = dragDropMode === "copy" ? "copy" : "move";
+    const mode = dragDropModeFromDragEvent(e);
+    e.dataTransfer.dropEffect = mode === "copy" ? "copy" : "move";
     const position = dropInsertPositionFromEvent(e);
     setCampaignDropTarget(null);
     setCampaignDropCampaignTarget(
@@ -4939,9 +5076,10 @@ export default function WorkspaceEditorApp() {
     if (!payload) return;
     e.preventDefault();
     e.stopPropagation();
+    const mode = dragDropModeFromDragEvent(e);
 
     if (
-      dragDropMode === "move" &&
+      mode === "move" &&
       payload.sourceWorkspaceId === targetWorkspaceId &&
       payload.sourceClientId === targetClientId &&
       payload.sourceProjectId === targetProjectId
@@ -4966,7 +5104,8 @@ export default function WorkspaceEditorApp() {
       targetClientId,
       targetProjectId,
       targetCampaignId,
-      position
+      position,
+      mode
     );
   }
 
@@ -4979,9 +5118,10 @@ export default function WorkspaceEditorApp() {
     targetClientId: string,
     targetProjectId: string,
     targetCampaignId: string | null = null,
-    targetPosition: DropInsertPosition = "before"
+    targetPosition: DropInsertPosition = "before",
+    mode: DragDropMode = dragDropMode
   ) {
-    const isCopyMode = dragDropMode === "copy";
+    const isCopyMode = mode === "copy";
     const sourceData = await getWorkspaceDataForTransfer(sourceWorkspaceId);
     if (!sourceData) return;
     const targetData =
@@ -5014,6 +5154,7 @@ export default function WorkspaceEditorApp() {
       sourceName: sourceCampaign.name,
       existingNames: targetProject.campaigns.map((campaign) => campaign.name),
       destinationLabel: `project "${targetProject.name}"`,
+      mode,
     });
     if (!resolvedCampaignName) return;
 
@@ -5268,6 +5409,7 @@ export default function WorkspaceEditorApp() {
     setCampaignDropCampaignPosition("before");
     if (!payload) return;
     e.preventDefault();
+    const mode = dragDropModeFromDragEvent(e);
     await moveCampaignAcrossWorkspaces(
       payload.sourceWorkspaceId,
       payload.sourceClientId,
@@ -5275,7 +5417,10 @@ export default function WorkspaceEditorApp() {
       payload.campaignId,
       targetWorkspaceId,
       targetClientId,
-      targetProjectId
+      targetProjectId,
+      null,
+      "before",
+      mode
     );
   }
 
@@ -5595,6 +5740,32 @@ export default function WorkspaceEditorApp() {
     return () => document.removeEventListener("keydown", onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection, selectionLevel]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.altKey) {
+        setOptionCopyMode(true);
+      }
+    }
+    function onKeyUp(event: KeyboardEvent) {
+      if (!event.altKey) {
+        setOptionCopyMode(false);
+      }
+    }
+    function onBlur() {
+      setOptionCopyMode(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
+
+  const dragDropMode: DragDropMode = optionCopyMode ? "copy" : "move";
 
   // ─────────────────────────────────────────────────────────────────────
   // RENDER SECTIONS
@@ -6078,28 +6249,6 @@ export default function WorkspaceEditorApp() {
           <span className="pane-header-title">Workspaces</span>
         </div>
 
-        <div className="sidebar-dnd-mode">
-          <span className="sidebar-dnd-mode-label">Drag Mode</span>
-          <div className="toggle-pill sidebar-dnd-mode-toggle">
-            <button
-              className={`toggle-pill-btn${dragDropMode === "move" ? " is-active" : ""}`}
-              onClick={() => setDragDropMode("move")}
-              type="button"
-              title="Move dragged projects/ads"
-            >
-              Move
-            </button>
-            <button
-              className={`toggle-pill-btn${dragDropMode === "copy" ? " is-active" : ""}`}
-              onClick={() => setDragDropMode("copy")}
-              type="button"
-              title="Copy dragged projects/ads"
-            >
-              Copy
-            </button>
-          </div>
-        </div>
-
         <div className="pane-body">
           <div className="tree">
             <div className="tree-workspace-group-label">
@@ -6240,7 +6389,7 @@ export default function WorkspaceEditorApp() {
             />
           </div>
 
-          {!isLocalWorkspace && (
+          {!isLocalWorkspace && activeWorkspace.kind === "organization" && (
             <div className="form-group" style={{ marginTop: -6 }}>
               <button
                 className="btn btn-danger btn-sm"
@@ -6588,6 +6737,142 @@ export default function WorkspaceEditorApp() {
               <div className="info-stat-value">{counts.campaigns}</div>
               <div className="info-stat-label">Ads</div>
             </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderUserSettingsView() {
+    if (!cloudEnabled || !authUser) {
+      return (
+        <div className="empty-state">
+          <h3>Account settings unavailable</h3>
+          <p>Sign in to edit user settings.</p>
+        </div>
+      );
+    }
+
+    const fallbackName = defaultProfileDisplayName(authUser.email ?? null);
+    const title = effectiveProfileDisplayName || fallbackName;
+    const settingsDirty =
+      profileDisplayNameDraft.trim() !== profileDisplayNameSaved.trim() ||
+      (profileImageDataUrl ?? null) !== (profileImageDataUrlSaved ?? null);
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+        <div className="context-header">
+          <div className="context-header-eyebrow">User Settings</div>
+          <div className="context-header-title">{title}</div>
+          <div className="context-header-meta">
+            Update your display name and profile image.
+          </div>
+        </div>
+
+        <div className="form-section" style={{ overflowY: "auto" }}>
+          {profileSettingsLoading && (
+            <div style={{ fontSize: 12, color: "var(--muted)" }}>
+              Loading profile settings...
+            </div>
+          )}
+          <div className="client-profile-row">
+            <div className="client-avatar-lg">
+              {profileImageDataUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={profileImageDataUrl} alt="" />
+              ) : (
+                <IconUser />
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <label className="btn btn-secondary btn-sm" style={{ cursor: "pointer" }}>
+                <input
+                  type="file"
+                  accept="image/*"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void pickUserProfileImage(file);
+                    e.currentTarget.value = "";
+                  }}
+                />
+                Upload Photo
+              </label>
+              {profileImageDataUrl && (
+                <button
+                  className="btn btn-ghost btn-sm"
+                  type="button"
+                  onClick={() => setProfileImageDataUrl(null)}
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Display Name</label>
+            <input
+              className="form-input"
+              value={profileDisplayNameDraft}
+              onChange={(e) => setProfileDisplayNameDraft(e.target.value)}
+              placeholder={fallbackName}
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Login Email</label>
+            <input
+              className="form-input"
+              value={authUser.email ?? ""}
+              readOnly
+            />
+          </div>
+
+          <div className="info-stat-block" style={{ gap: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>
+              Upcoming
+            </div>
+            <div style={{ fontSize: 12, color: "var(--muted)" }}>
+              More profile preferences can live here over time.
+            </div>
+          </div>
+
+          {profileSettingsError && (
+            <div style={{ fontSize: 12, color: "var(--danger)" }}>
+              {profileSettingsError}
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 8, alignItems: "center", paddingTop: 4 }}>
+            <button
+              className="btn btn-primary btn-sm"
+              type="button"
+              onClick={() => {
+                void saveUserProfileSettings();
+              }}
+              disabled={!settingsDirty || profileSettingsSaving || profileSettingsLoading}
+            >
+              {profileSettingsSaving ? "Saving..." : "Save Settings"}
+            </button>
+            <button
+              className="btn btn-secondary btn-sm"
+              type="button"
+              onClick={() => {
+                setProfileDisplayNameDraft(profileDisplayNameSaved);
+                setProfileImageDataUrl(profileImageDataUrlSaved);
+              }}
+              disabled={!settingsDirty || profileSettingsSaving}
+            >
+              Reset
+            </button>
+            <button
+              className="btn btn-ghost btn-sm"
+              type="button"
+              onClick={() => setShowUserSettings(false)}
+            >
+              Back
+            </button>
           </div>
         </div>
       </div>
@@ -7823,6 +8108,21 @@ export default function WorkspaceEditorApp() {
 
   // ── Info Pane (right, when client/project selected) ─────────────
 
+  function renderUserSettingsInfoPane() {
+    return (
+      <div className="info-pane">
+        <div className="info-stat-block">
+          <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>
+            User settings
+          </div>
+          <div style={{ fontSize: 12, color: "var(--muted)" }}>
+            Profile preferences are shown in the middle pane.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function renderInfoPane() {
     if (selectionLevel === "workspace") {
       return (
@@ -8225,15 +8525,63 @@ export default function WorkspaceEditorApp() {
           <button
             className="btn btn-export"
             onClick={() => setExportPanelOpen(true)}
-            disabled={!selectedClient || selectionLevel === "workspace"}
+            disabled={!selectedClient || selectionLevel === "workspace" || showUserSettings}
           >
             Export ↑
           </button>
           {cloudEnabled && authUser && (
             <>
-              <span style={{ fontSize: 12, color: "var(--ink-3)", whiteSpace: "nowrap" }}>
-                {authUser.email}
-              </span>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setShowUserSettings(true)}
+                title="Open user settings"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  maxWidth: 220,
+                  overflow: "hidden",
+                }}
+              >
+                <span
+                  style={{
+                    width: 18,
+                    height: 18,
+                    borderRadius: "50%",
+                    overflow: "hidden",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    background: "var(--line)",
+                    color: "var(--ink-2)",
+                    fontSize: 11,
+                    fontWeight: 700,
+                    flexShrink: 0,
+                  }}
+                >
+                  {profileImageDataUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={profileImageDataUrl}
+                      alt=""
+                      style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                    />
+                  ) : (
+                    effectiveProfileDisplayName.slice(0, 1).toUpperCase()
+                  )}
+                </span>
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: "var(--ink-3)",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {effectiveProfileDisplayName}
+                </span>
+              </button>
               <button className="btn btn-secondary btn-sm" onClick={() => void signOut()}>
                 Sign Out
               </button>
@@ -8347,13 +8695,15 @@ export default function WorkspaceEditorApp() {
             borderRight: "1px solid var(--line)",
           }}
         >
-          {selectionLevel === "client"
-            ? renderClientView()
-            : selectionLevel === "workspace"
-            ? renderWorkspaceView()
-            : selectionLevel === "project"
-            ? renderProjectView()
-            : renderCampaignEditor()}
+          {showUserSettings
+            ? renderUserSettingsView()
+            : selectionLevel === "client"
+              ? renderClientView()
+              : selectionLevel === "workspace"
+                ? renderWorkspaceView()
+                : selectionLevel === "project"
+                  ? renderProjectView()
+                  : renderCampaignEditor()}
         </main>
 
         <ResizeHandle
@@ -8367,7 +8717,7 @@ export default function WorkspaceEditorApp() {
 
         {/* Preview pane */}
         <aside className="pane pane-preview">
-          {renderPreview()}
+          {showUserSettings ? renderUserSettingsInfoPane() : renderPreview()}
         </aside>
       </div>
 
