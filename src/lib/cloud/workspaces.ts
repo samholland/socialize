@@ -142,6 +142,29 @@ export async function listAccessibleWorkspaces(
   ];
 }
 
+export async function createOrganizationWorkspace(
+  supabase: SupabaseClient,
+  workspaceId: string,
+  workspaceName: string
+): Promise<CloudWorkspace> {
+  const { data, error } = await supabase.rpc("create_organization_workspace", {
+    p_workspace_id: workspaceId,
+    p_workspace_name: workspaceName,
+  });
+  if (error) throw error;
+
+  const row = Array.isArray(data) ? data[0] : null;
+  if (!row || typeof row.id !== "string" || typeof row.name !== "string") {
+    throw new Error("Failed to create organization workspace.");
+  }
+
+  return {
+    id: row.id,
+    name: row.name,
+    kind: "organization",
+  };
+}
+
 export async function loadWorkspaceData(
   supabase: SupabaseClient,
   workspaceId: string

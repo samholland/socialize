@@ -586,6 +586,34 @@ html, body {
   opacity: 0.5;
 }
 
+.tree-row-campaign.is-insert-before::before,
+.tree-row-campaign.is-insert-after::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.tree-row-campaign.is-insert-before::before {
+  top: -1px;
+}
+
+.tree-row-campaign.is-insert-after::after {
+  bottom: -1px;
+}
+
+.tree-row-uploading {
+  cursor: default;
+  opacity: 0.82;
+  font-style: italic;
+  color: var(--muted);
+  pointer-events: none;
+}
+
 .tree-row-with-toggle {
   padding-right: 34px;
 }

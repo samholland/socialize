@@ -19,12 +19,22 @@ import {
 import { getBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import {
+  createOrganizationWorkspace,
   ensureProfileAndPersonalWorkspace,
   listAccessibleWorkspaces,
   loadWorkspaceData as loadCloudWorkspaceData,
   saveWorkspaceData,
   type CloudAppData,
 } from "@/lib/cloud/workspaces";
+import {
+  acceptWorkspaceInvite,
+  createWorkspaceInvite,
+  listMyPendingWorkspaceInvites,
+  listWorkspaceInvites,
+  revokeWorkspaceInvite,
+  type CloudIncomingWorkspaceInvite,
+  type CloudWorkspaceInvite,
+} from "@/lib/cloud/invites";
 import {
   getLocalWorkspaceState,
   listLocalMediaAssetsForWorkspace,
@@ -45,6 +55,7 @@ type Platform =
 
 type WorkspaceKind = "local" | "personal" | "organization";
 type Workspace = { id: string; name: string; kind: WorkspaceKind };
+type WorkspaceInviteRole = "member" | "owner";
 
 type CtaOption = "Learn More" | "Shop Now" | "Sign Up" | "Download";
 type MediaAspect = "1:1" | "3:4" | "9:16";
@@ -53,6 +64,7 @@ type CampaignStatus = "draft" | "ready";
 type EngagementPreset = "low" | "medium" | "high";
 type SelectionLevel = "workspace" | "client" | "project" | "campaign";
 type DragDropMode = "move" | "copy";
+type DropInsertPosition = "before" | "after";
 // EditorMode kept minimal — Campaign tab removed, only Ad editor remains
 
 type Campaign = {
@@ -717,6 +729,10 @@ function loadActiveWsId(workspaces: Workspace[]): string {
   const stored = localStorage.getItem(ACTIVE_WS_KEY);
   if (stored && workspaces.find((w) => w.id === stored)) return stored;
   return workspaces[0]?.id ?? "ws_default";
+}
+
+function isLikelyEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
 function loadWorkspaceDataFromLocalStorage(
@@ -1535,6 +1551,23 @@ export default function WorkspaceEditorApp() {
     useState<WorkspaceStorageEstimate | null>(null);
   const [workspaceStorageLoading, setWorkspaceStorageLoading] = useState(false);
   const [workspaceStorageError, setWorkspaceStorageError] = useState<string | null>(null);
+  const [workspaceInviteEmailDraft, setWorkspaceInviteEmailDraft] = useState("");
+  const [workspaceInviteRoleDraft, setWorkspaceInviteRoleDraft] =
+    useState<WorkspaceInviteRole>("member");
+  const [workspaceInvitesByWorkspace, setWorkspaceInvitesByWorkspace] = useState<
+    Record<string, CloudWorkspaceInvite[]>
+  >({});
+  const [workspaceInvitesLoading, setWorkspaceInvitesLoading] = useState(false);
+  const [workspaceInvitesSaving, setWorkspaceInvitesSaving] = useState(false);
+  const [workspaceInvitesError, setWorkspaceInvitesError] = useState<string | null>(null);
+  const [incomingWorkspaceInvites, setIncomingWorkspaceInvites] = useState<
+    CloudIncomingWorkspaceInvite[]
+  >([]);
+  const [incomingWorkspaceInvitesLoading, setIncomingWorkspaceInvitesLoading] =
+    useState(false);
+  const [incomingWorkspaceInvitesError, setIncomingWorkspaceInvitesError] = useState<
+    string | null
+  >(null);
 
   // Undo
   const [pendingUndo, setPendingUndo] = useState<PendingUndo | null>(null);
@@ -1551,8 +1584,8 @@ export default function WorkspaceEditorApp() {
 
   // Inline renaming
   const [editingName, setEditingName] = useState<EditingName | null>(null);
-  const [isRenamingLocalWorkspace, setIsRenamingLocalWorkspace] = useState(false);
-  const [localWorkspaceNameDraft, setLocalWorkspaceNameDraft] = useState("");
+  const [renamingWorkspaceId, setRenamingWorkspaceId] = useState<string | null>(null);
+  const [workspaceRenameDraft, setWorkspaceRenameDraft] = useState("");
   const [workspaceNameFieldDraft, setWorkspaceNameFieldDraft] = useState("");
 
   // Tree expand/collapse
@@ -1572,6 +1605,13 @@ export default function WorkspaceEditorApp() {
   const [draggingCampaignPayload, setDraggingCampaignPayload] =
     useState<CampaignDragPayload | null>(null);
   const [campaignDropTarget, setCampaignDropTarget] = useState<string | null>(null);
+  const [campaignDropCampaignTarget, setCampaignDropCampaignTarget] =
+    useState<string | null>(null);
+  const [campaignDropCampaignPosition, setCampaignDropCampaignPosition] =
+    useState<DropInsertPosition>("before");
+  const [uploadingTransferTargets, setUploadingTransferTargets] = useState<
+    Record<string, number>
+  >({});
   const [draggingProjectPayload, setDraggingProjectPayload] =
     useState<ProjectDragPayload | null>(null);
   const [projectDropWorkspaceId, setProjectDropWorkspaceId] = useState<string | null>(null);
@@ -1605,10 +1645,37 @@ export default function WorkspaceEditorApp() {
   const activeWorkspaceIsLocal = activeWorkspace.kind === "local";
 
   useEffect(() => {
-    if (isRenamingLocalWorkspace) return;
-    setLocalWorkspaceNameDraft(localWorkspace.name);
-    setWorkspaceNameFieldDraft(localWorkspace.name);
-  }, [localWorkspace.name, isRenamingLocalWorkspace]);
+    if (renamingWorkspaceId) return;
+    setWorkspaceRenameDraft(activeWorkspace.name);
+    setWorkspaceNameFieldDraft(activeWorkspace.name);
+  }, [activeWorkspace.name, renamingWorkspaceId]);
+
+  useEffect(() => {
+    setWorkspaceInviteEmailDraft("");
+    setWorkspaceInviteRoleDraft("member");
+  }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    if (!cloudEnabled || !supabase || !authUser) {
+      setIncomingWorkspaceInvites([]);
+      setIncomingWorkspaceInvitesError(null);
+      setWorkspaceInvitesByWorkspace({});
+      setWorkspaceInvitesError(null);
+      return;
+    }
+    void refreshIncomingWorkspaceInviteList();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloudEnabled, supabase, authUser?.id]);
+
+  useEffect(() => {
+    if (!cloudEnabled || !supabase || !authUser) return;
+    if (activeWorkspace.kind !== "organization") {
+      setWorkspaceInvitesError(null);
+      return;
+    }
+    void refreshWorkspaceInviteList(activeWorkspaceId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloudEnabled, supabase, authUser?.id, activeWorkspaceId, activeWorkspace.kind]);
 
   function updateLocalWorkspaceName(nextNameRaw: string): string {
     const normalized = normalizeWorkspaceName(nextNameRaw);
@@ -1627,27 +1694,246 @@ export default function WorkspaceEditorApp() {
     return normalized;
   }
 
-  function beginLocalWorkspaceRename() {
-    setIsRenamingLocalWorkspace(true);
-    setLocalWorkspaceNameDraft(localWorkspace.name);
+  async function updateWorkspaceName(
+    workspaceId: string,
+    nextNameRaw: string
+  ): Promise<string | null> {
+    const normalized = normalizeWorkspaceName(nextNameRaw);
+    const existing = workspaces.find((workspace) => workspace.id === workspaceId);
+    if (!existing) return null;
+    if (existing.name === normalized) return normalized;
+
+    const previousName = existing.name;
+    setWorkspaces((prev) =>
+      prev.map((workspace) =>
+        workspace.id === workspaceId ? { ...workspace, name: normalized } : workspace
+      )
+    );
+
+    if (existing.kind === "local") {
+      safeSetLocalStorage(LOCAL_WS_NAME_KEY, normalized);
+      return normalized;
+    }
+
+    if (cloudEnabled && supabase && authUser) {
+      const { error } = await supabase
+        .from("workspaces")
+        .update({ name: normalized })
+        .eq("id", workspaceId);
+      if (error) {
+        console.error("Failed to rename workspace", error);
+        setWorkspaces((prev) =>
+          prev.map((workspace) =>
+            workspace.id === workspaceId ? { ...workspace, name: previousName } : workspace
+          )
+        );
+        alert("Unable to rename workspace.");
+        return null;
+      }
+      return normalized;
+    }
+
+    return normalized;
   }
 
-  function commitLocalWorkspaceRename() {
-    const normalized = updateLocalWorkspaceName(localWorkspaceNameDraft);
-    setLocalWorkspaceNameDraft(normalized);
-    setWorkspaceNameFieldDraft(normalized);
-    setIsRenamingLocalWorkspace(false);
+  function beginWorkspaceRename(workspaceId: string) {
+    const workspace = workspaces.find((entry) => entry.id === workspaceId);
+    if (!workspace) return;
+    setRenamingWorkspaceId(workspaceId);
+    setWorkspaceRenameDraft(workspace.name);
   }
 
-  function cancelLocalWorkspaceRename() {
-    setLocalWorkspaceNameDraft(localWorkspace.name);
-    setIsRenamingLocalWorkspace(false);
+  async function commitWorkspaceRename() {
+    if (!renamingWorkspaceId) return;
+    const targetWorkspace = workspaces.find(
+      (workspace) => workspace.id === renamingWorkspaceId
+    );
+    const fallbackName = targetWorkspace?.name ?? activeWorkspace.name;
+    const normalized = await updateWorkspaceName(renamingWorkspaceId, workspaceRenameDraft);
+    const nextName = normalized ?? fallbackName;
+    setWorkspaceRenameDraft(nextName);
+    if (renamingWorkspaceId === activeWorkspaceId) {
+      setWorkspaceNameFieldDraft(nextName);
+    }
+    setRenamingWorkspaceId(null);
   }
 
-  function commitWorkspaceNameField() {
-    const normalized = updateLocalWorkspaceName(workspaceNameFieldDraft);
-    setWorkspaceNameFieldDraft(normalized);
-    setLocalWorkspaceNameDraft(normalized);
+  function cancelWorkspaceRename() {
+    const workspace = renamingWorkspaceId
+      ? workspaces.find((entry) => entry.id === renamingWorkspaceId)
+      : null;
+    setWorkspaceRenameDraft(workspace?.name ?? activeWorkspace.name);
+    setRenamingWorkspaceId(null);
+  }
+
+  async function commitWorkspaceNameField() {
+    const normalized = await updateWorkspaceName(activeWorkspaceId, workspaceNameFieldDraft);
+    const nextName = normalized ?? activeWorkspace.name;
+    setWorkspaceNameFieldDraft(nextName);
+    setWorkspaceRenameDraft(nextName);
+  }
+
+  async function refreshIncomingWorkspaceInviteList() {
+    if (!cloudEnabled || !supabase || !authUser) {
+      setIncomingWorkspaceInvites([]);
+      setIncomingWorkspaceInvitesError(null);
+      return;
+    }
+    setIncomingWorkspaceInvitesLoading(true);
+    setIncomingWorkspaceInvitesError(null);
+    try {
+      const invites = await listMyPendingWorkspaceInvites(supabase);
+      setIncomingWorkspaceInvites(invites);
+    } catch (error) {
+      console.error("Failed to load incoming workspace invites", error);
+      const message =
+        error instanceof Error ? error.message : "Unable to load incoming invites.";
+      setIncomingWorkspaceInvitesError(message);
+    } finally {
+      setIncomingWorkspaceInvitesLoading(false);
+    }
+  }
+
+  async function refreshWorkspaceInviteList(workspaceId = activeWorkspaceId) {
+    if (!cloudEnabled || !supabase || !authUser) return;
+    const workspace = workspaces.find((entry) => entry.id === workspaceId);
+    if (!workspace || workspace.kind !== "organization") return;
+
+    const isActive = workspaceId === activeWorkspaceId;
+    if (isActive) {
+      setWorkspaceInvitesLoading(true);
+      setWorkspaceInvitesError(null);
+    }
+    try {
+      const invites = await listWorkspaceInvites(supabase, workspaceId);
+      setWorkspaceInvitesByWorkspace((prev) => ({ ...prev, [workspaceId]: invites }));
+    } catch (error) {
+      console.error("Failed to load workspace invites", error);
+      if (isActive) {
+        const message =
+          error instanceof Error ? error.message : "Unable to load workspace invites.";
+        setWorkspaceInvitesError(message);
+      }
+    } finally {
+      if (isActive) setWorkspaceInvitesLoading(false);
+    }
+  }
+
+  async function refreshCloudWorkspaceList(): Promise<Workspace[]> {
+    if (!cloudEnabled || !supabase || !authUser) return workspaces;
+    const localWorkspaceEntry = createLocalWorkspace();
+    const wsList = await listAccessibleWorkspaces(supabase, authUser.id);
+    const resolved: Workspace[] = [
+      localWorkspaceEntry,
+      ...wsList
+        .filter((workspace) => workspace.id !== localWorkspaceEntry.id)
+        .map((workspace) => ({
+          id: workspace.id,
+          name: workspace.name,
+          kind: workspace.kind,
+        })),
+    ];
+    setWorkspaces(resolved);
+    return resolved;
+  }
+
+  async function addWorkspaceInvite() {
+    if (activeWorkspace.kind !== "organization") return;
+    if (!cloudEnabled || !supabase || !authUser) return;
+    const email = workspaceInviteEmailDraft.trim().toLowerCase();
+    if (!email) return;
+    if (!isLikelyEmail(email)) {
+      alert("Please enter a valid email address.");
+      return;
+    }
+    setWorkspaceInvitesSaving(true);
+    setWorkspaceInvitesError(null);
+    try {
+      await createWorkspaceInvite(
+        supabase,
+        activeWorkspaceId,
+        email,
+        workspaceInviteRoleDraft
+      );
+      setWorkspaceInviteEmailDraft("");
+      await Promise.all([
+        refreshWorkspaceInviteList(activeWorkspaceId),
+        refreshIncomingWorkspaceInviteList(),
+      ]);
+    } catch (error) {
+      console.error("Failed to create workspace invite", error);
+      const message =
+        error instanceof Error ? error.message : "Unable to create workspace invite.";
+      setWorkspaceInvitesError(message);
+      alert(message);
+    } finally {
+      setWorkspaceInvitesSaving(false);
+    }
+  }
+
+  async function removeWorkspaceInvite(inviteId: string) {
+    if (activeWorkspace.kind !== "organization") return;
+    if (!cloudEnabled || !supabase || !authUser) return;
+    setWorkspaceInvitesSaving(true);
+    setWorkspaceInvitesError(null);
+    try {
+      await revokeWorkspaceInvite(supabase, inviteId);
+      await Promise.all([
+        refreshWorkspaceInviteList(activeWorkspaceId),
+        refreshIncomingWorkspaceInviteList(),
+      ]);
+    } catch (error) {
+      console.error("Failed to revoke workspace invite", error);
+      const message =
+        error instanceof Error ? error.message : "Unable to revoke workspace invite.";
+      setWorkspaceInvitesError(message);
+      alert(message);
+    } finally {
+      setWorkspaceInvitesSaving(false);
+    }
+  }
+
+  async function acceptIncomingWorkspaceInvite(inviteId: string) {
+    if (!cloudEnabled || !supabase || !authUser) return;
+    setIncomingWorkspaceInvitesLoading(true);
+    setIncomingWorkspaceInvitesError(null);
+    try {
+      const accepted = await acceptWorkspaceInvite(supabase, inviteId);
+      const nextWorkspaces = await refreshCloudWorkspaceList();
+      const targetWorkspace = nextWorkspaces.find(
+        (workspace) => workspace.id === accepted.workspaceId
+      );
+      if (!targetWorkspace) {
+        throw new Error("Invite accepted but workspace is not visible yet.");
+      }
+
+      const cloudData = (await loadCloudWorkspaceData(
+        supabase,
+        accepted.workspaceId
+      )) as CloudAppData;
+      const normalized = normalizeData(cloudData as AppData);
+      hydratedWorkspaceRef.current = accepted.workspaceId;
+      setActiveWorkspaceId(accepted.workspaceId);
+      setData(normalized);
+      setWorkspaceTreeData((prev) => ({ ...prev, [accepted.workspaceId]: normalized }));
+      setSelection(defaultSelection(normalized));
+      setSelectionLevel("workspace");
+      replaceCampaignMedia({});
+      await hydrateSignedMediaForWorkspace(accepted.workspaceId, normalized);
+
+      await Promise.all([
+        refreshIncomingWorkspaceInviteList(),
+        refreshWorkspaceInviteList(accepted.workspaceId),
+      ]);
+    } catch (error) {
+      console.error("Failed to accept workspace invite", error);
+      const message =
+        error instanceof Error ? error.message : "Unable to accept workspace invite.";
+      setIncomingWorkspaceInvitesError(message);
+      alert(message);
+    } finally {
+      setIncomingWorkspaceInvitesLoading(false);
+    }
   }
 
   function clientExpandKey(clientId: string, workspaceId = activeWorkspaceId): string {
@@ -1664,6 +1950,53 @@ export default function WorkspaceEditorApp() {
 
   function campaignDropTargetKey(projectId: string, workspaceId = activeWorkspaceId): string {
     return `${workspaceId}::project-drop::${projectId}`;
+  }
+
+  function campaignRowDropTargetKey(
+    campaignId: string,
+    workspaceId = activeWorkspaceId
+  ): string {
+    return `${workspaceId}::campaign-drop::${campaignId}`;
+  }
+
+  function dropInsertPositionFromEvent(
+    e: React.DragEvent<HTMLDivElement>
+  ): DropInsertPosition {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const midpoint = rect.top + rect.height / 2;
+    return e.clientY > midpoint ? "after" : "before";
+  }
+
+  function transferUploadTargetKey(projectId: string, workspaceId = activeWorkspaceId): string {
+    return `${workspaceId}::project-upload::${projectId}`;
+  }
+
+  function beginTransferUploadIndicator(
+    workspaceId: string,
+    projectId: string,
+    count = 1
+  ) {
+    const key = transferUploadTargetKey(projectId, workspaceId);
+    setUploadingTransferTargets((prev) => ({
+      ...prev,
+      [key]: (prev[key] ?? 0) + Math.max(1, count),
+    }));
+  }
+
+  function endTransferUploadIndicator(
+    workspaceId: string,
+    projectId: string,
+    count = 1
+  ) {
+    const key = transferUploadTargetKey(projectId, workspaceId);
+    setUploadingTransferTargets((prev) => {
+      const nextCount = Math.max(0, (prev[key] ?? 0) - Math.max(1, count));
+      if (nextCount <= 0) {
+        const { [key]: _ignored, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [key]: nextCount };
+    });
   }
 
   function storyCtaOffsetKey(campaignId: string, workspaceId = activeWorkspaceId): string {
@@ -2962,16 +3295,15 @@ export default function WorkspaceEditorApp() {
   function createWorkspace() {
     if (cloudEnabled && supabase && authUser) {
       const existingShared = workspaces.filter((w) => w.kind !== "local").length;
-      const name = `Cloud Workspace ${existingShared + 1}`;
-      const ws: Workspace = { id: newId("ws"), name, kind: "personal" };
+      const name = `Shared Workspace ${existingShared + 1}`;
+      const wsId = newId("ws");
       void (async () => {
-        const { error } = await supabase.from("workspaces").insert({
-          id: ws.id,
-          type: "personal",
-          owner_user_id: authUser.id,
-          name: ws.name,
-        });
-        if (error) {
+        let ws: Workspace;
+        try {
+          const created = await createOrganizationWorkspace(supabase, wsId, name);
+          ws = { id: created.id, name: created.name, kind: created.kind };
+        } catch (error) {
+          console.error("Failed to create workspace", error);
           alert("Failed to create workspace.");
           return;
         }
@@ -2986,6 +3318,47 @@ export default function WorkspaceEditorApp() {
       })();
       return;
     }
+  }
+
+  function deleteActiveWorkspace() {
+    if (activeWorkspace.kind === "local") {
+      alert("The Local Workspace cannot be deleted.");
+      return;
+    }
+    if (!cloudEnabled || !supabase || !authUser) return;
+
+    const targetWorkspaceId = activeWorkspace.id;
+    const targetWorkspaceName = activeWorkspace.name;
+    const confirmed = window.confirm(
+      `Delete workspace "${targetWorkspaceName}"?\n\nThis permanently deletes its clients, projects, ads, and media references.`
+    );
+    if (!confirmed) return;
+
+    void (async () => {
+      try {
+        const { error } = await supabase
+          .from("workspaces")
+          .delete()
+          .eq("id", targetWorkspaceId);
+        if (error) {
+          throw error;
+        }
+
+        setWorkspaceInvitesByWorkspace((prev) => {
+          const { [targetWorkspaceId]: _ignored, ...rest } = prev;
+          return rest;
+        });
+
+        await refreshCloudWorkspaceList();
+        await switchWorkspace(LOCAL_WORKSPACE_ID, "workspace");
+        await refreshIncomingWorkspaceInviteList();
+      } catch (error) {
+        console.error("Failed to delete workspace", error);
+        const message =
+          error instanceof Error ? error.message : "Failed to delete workspace.";
+        alert(message);
+      }
+    })();
   }
 
   function markImportDone(userId: string) {
@@ -3587,6 +3960,8 @@ export default function WorkspaceEditorApp() {
     setDraggingCampaignId(null);
     setDraggingCampaignPayload(null);
     setCampaignDropTarget(null);
+    setCampaignDropCampaignTarget(null);
+    setCampaignDropCampaignPosition("before");
   }
 
   function onProjectDragStart(
@@ -3781,29 +4156,40 @@ export default function WorkspaceEditorApp() {
     let targetFinal = targetNext;
     let failedMediaTransfers = 0;
     let successfulMediaTransfers = 0;
-    for (let i = 0; i < sourceProject.campaigns.length; i += 1) {
-      const sourceCampaign = sourceProject.campaigns[i];
-      const movedCampaign = movedProject.campaigns[i];
-      if (!sourceCampaign || !movedCampaign) continue;
-      if (!sourceCampaign.mediaStoragePath) continue;
-
+    const mediaTransferCount = sourceProject.campaigns.reduce(
+      (count, campaign) => (campaign.mediaStoragePath ? count + 1 : count),
+      0
+    );
+    if (mediaTransferCount > 0) {
+      beginTransferUploadIndicator(targetWorkspaceId, movedProject.id, mediaTransferCount);
       try {
-        const transferred = await transferCampaignMediaBetweenWorkspaces(
-          sourceWorkspaceId,
-          targetWorkspaceId,
-          sourceCampaign,
-          movedCampaign.id,
-          sourceLocalLookup
-        );
-        if (!transferred) {
-          failedMediaTransfers += 1;
-          continue;
+        for (let i = 0; i < sourceProject.campaigns.length; i += 1) {
+          const sourceCampaign = sourceProject.campaigns[i];
+          const movedCampaign = movedProject.campaigns[i];
+          if (!sourceCampaign || !movedCampaign) continue;
+          if (!sourceCampaign.mediaStoragePath) continue;
+
+          try {
+            const transferred = await transferCampaignMediaBetweenWorkspaces(
+              sourceWorkspaceId,
+              targetWorkspaceId,
+              sourceCampaign,
+              movedCampaign.id,
+              sourceLocalLookup
+            );
+            if (!transferred) {
+              failedMediaTransfers += 1;
+              continue;
+            }
+            targetFinal = applyCampaignMediaUpdate(targetFinal, movedCampaign.id, transferred);
+            successfulMediaTransfers += 1;
+          } catch (error) {
+            console.warn("Failed to transfer campaign media during project move", error);
+            failedMediaTransfers += 1;
+          }
         }
-        targetFinal = applyCampaignMediaUpdate(targetFinal, movedCampaign.id, transferred);
-        successfulMediaTransfers += 1;
-      } catch (error) {
-        console.warn("Failed to transfer campaign media during project move", error);
-        failedMediaTransfers += 1;
+      } finally {
+        endTransferUploadIndicator(targetWorkspaceId, movedProject.id, mediaTransferCount);
       }
     }
 
@@ -3910,7 +4296,185 @@ export default function WorkspaceEditorApp() {
     }
     e.preventDefault();
     e.dataTransfer.dropEffect = dragDropMode === "copy" ? "copy" : "move";
+    setCampaignDropCampaignTarget(null);
+    setCampaignDropCampaignPosition("before");
     setCampaignDropTarget(campaignDropTargetKey(targetProjectId, targetWorkspaceId));
+  }
+
+  function reorderCampaignList(
+    campaigns: Campaign[],
+    sourceCampaignId: string,
+    targetCampaignId: string,
+    position: DropInsertPosition
+  ): Campaign[] {
+    const sourceIndex = campaigns.findIndex((campaign) => campaign.id === sourceCampaignId);
+    const targetIndex = campaigns.findIndex((campaign) => campaign.id === targetCampaignId);
+    if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return campaigns;
+
+    const moved = campaigns[sourceIndex];
+    if (!moved) return campaigns;
+    const remaining = campaigns.filter((campaign) => campaign.id !== sourceCampaignId);
+    const adjustedTargetIndex = remaining.findIndex(
+      (campaign) => campaign.id === targetCampaignId
+    );
+    if (adjustedTargetIndex < 0) return campaigns;
+    const insertIndex =
+      position === "after" ? adjustedTargetIndex + 1 : adjustedTargetIndex;
+    const next = [...remaining];
+    next.splice(insertIndex, 0, moved);
+    return next;
+  }
+
+  function insertCampaignAtTarget(
+    campaigns: Campaign[],
+    campaign: Campaign,
+    targetCampaignId: string | null,
+    position: DropInsertPosition
+  ): Campaign[] {
+    if (!targetCampaignId) return [...campaigns, campaign];
+    const index = campaigns.findIndex((candidate) => candidate.id === targetCampaignId);
+    if (index < 0) return [...campaigns, campaign];
+    const insertIndex = position === "after" ? index + 1 : index;
+    const next = [...campaigns];
+    next.splice(insertIndex, 0, campaign);
+    return next;
+  }
+
+  async function reorderCampaignWithinProject(
+    workspaceId: string,
+    clientId: string,
+    projectId: string,
+    sourceCampaignId: string,
+    targetCampaignId: string,
+    position: DropInsertPosition
+  ) {
+    if (sourceCampaignId === targetCampaignId && position === "before") return;
+    const workspaceData = await getWorkspaceDataForTransfer(workspaceId);
+    if (!workspaceData) return;
+
+    let changed = false;
+    const nextData: AppData = {
+      clients: workspaceData.clients.map((client) => {
+        if (client.id !== clientId) return client;
+        return {
+          ...client,
+          projects: client.projects.map((project) => {
+            if (project.id !== projectId) return project;
+            const reordered = reorderCampaignList(
+              project.campaigns,
+              sourceCampaignId,
+              targetCampaignId,
+              position
+            );
+            if (reordered !== project.campaigns) {
+              changed = true;
+            }
+            return { ...project, campaigns: reordered };
+          }),
+        };
+      }),
+    };
+
+    if (!changed) return;
+
+    const nextSelection =
+      workspaceId === activeWorkspaceId
+        ? coerceSelection(nextData, selection)
+        : defaultSelection(nextData);
+    const nextLevel =
+      workspaceId === activeWorkspaceId
+        ? selectionLevelFromSelection(nextSelection)
+        : selectionLevelFromSelection(nextSelection);
+
+    try {
+      await persistWorkspaceStateSnapshot(
+        workspaceId,
+        nextData,
+        nextSelection,
+        nextLevel
+      );
+    } catch (error) {
+      console.error("Failed to persist reordered campaigns", error);
+      alert("Unable to reorder ads.");
+      return;
+    }
+
+    setWorkspaceTreeData((prev) => ({ ...prev, [workspaceId]: nextData }));
+    if (workspaceId === activeWorkspaceId) {
+      setData(nextData);
+      setSelection(nextSelection);
+      setSelectionLevel(nextLevel);
+    }
+  }
+
+  function onCampaignRowDragOver(
+    e: React.DragEvent<HTMLDivElement>,
+    targetWorkspaceId: string,
+    targetCampaignId: string
+  ) {
+    const payload = draggingCampaignPayload ?? readCampaignDragPayload(e);
+    if (!payload) return;
+    if (
+      payload.sourceWorkspaceId === targetWorkspaceId &&
+      payload.campaignId === targetCampaignId
+    ) {
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = dragDropMode === "copy" ? "copy" : "move";
+    const position = dropInsertPositionFromEvent(e);
+    setCampaignDropTarget(null);
+    setCampaignDropCampaignTarget(
+      campaignRowDropTargetKey(targetCampaignId, targetWorkspaceId)
+    );
+    setCampaignDropCampaignPosition(position);
+  }
+
+  async function onCampaignRowDrop(
+    e: React.DragEvent<HTMLDivElement>,
+    targetWorkspaceId: string,
+    targetClientId: string,
+    targetProjectId: string,
+    targetCampaignId: string
+  ) {
+    const payload = draggingCampaignPayload ?? readCampaignDragPayload(e);
+    setCampaignDropCampaignTarget(null);
+    setCampaignDropTarget(null);
+    const position = campaignDropCampaignPosition;
+    setCampaignDropCampaignPosition("before");
+    if (!payload) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (
+      dragDropMode === "move" &&
+      payload.sourceWorkspaceId === targetWorkspaceId &&
+      payload.sourceClientId === targetClientId &&
+      payload.sourceProjectId === targetProjectId
+    ) {
+      await reorderCampaignWithinProject(
+        targetWorkspaceId,
+        targetClientId,
+        targetProjectId,
+        payload.campaignId,
+        targetCampaignId,
+        position
+      );
+      return;
+    }
+
+    await moveCampaignAcrossWorkspaces(
+      payload.sourceWorkspaceId,
+      payload.sourceClientId,
+      payload.sourceProjectId,
+      payload.campaignId,
+      targetWorkspaceId,
+      targetClientId,
+      targetProjectId,
+      targetCampaignId,
+      position
+    );
   }
 
   async function moveCampaignAcrossWorkspaces(
@@ -3920,7 +4484,9 @@ export default function WorkspaceEditorApp() {
     campaignId: string,
     targetWorkspaceId: string,
     targetClientId: string,
-    targetProjectId: string
+    targetProjectId: string,
+    targetCampaignId: string | null = null,
+    targetPosition: DropInsertPosition = "before"
   ) {
     const isCopyMode = dragDropMode === "copy";
     const sourceData = await getWorkspaceDataForTransfer(sourceWorkspaceId);
@@ -4016,7 +4582,15 @@ export default function WorkspaceEditorApp() {
           projects: client.projects.map((project) =>
             project.id !== targetProjectId
               ? project
-              : { ...project, campaigns: [...project.campaigns, movedCampaign] }
+              : {
+                  ...project,
+                  campaigns: insertCampaignAtTarget(
+                    project.campaigns,
+                    movedCampaign,
+                    targetCampaignId,
+                    targetPosition
+                  ),
+                }
           ),
         };
       }),
@@ -4087,6 +4661,7 @@ export default function WorkspaceEditorApp() {
       (!movedCampaign.mediaStoragePath ||
         movedCampaign.mediaStoragePath !== sourceCampaign.mediaStoragePath);
     if (needsMediaTransfer && sourceCampaign.mediaStoragePath) {
+      beginTransferUploadIndicator(targetWorkspaceId, targetProjectId);
       try {
         const sourceLocalLookup =
           sourceWorkspace?.kind === "local"
@@ -4118,6 +4693,8 @@ export default function WorkspaceEditorApp() {
           targetFinal = targetNext;
         }
         failedMediaTransfer = true;
+      } finally {
+        endTransferUploadIndicator(targetWorkspaceId, targetProjectId);
       }
     }
 
@@ -4194,6 +4771,8 @@ export default function WorkspaceEditorApp() {
   ) {
     const payload = draggingCampaignPayload ?? readCampaignDragPayload(e);
     setCampaignDropTarget(null);
+    setCampaignDropCampaignTarget(null);
+    setCampaignDropCampaignPosition("before");
     if (!payload) return;
     e.preventDefault();
     await moveCampaignAcrossWorkspaces(
@@ -4558,23 +5137,22 @@ export default function WorkspaceEditorApp() {
       const isWorkspaceExpanded =
         expandedWorkspaces[workspaceExpandKey(workspace.id)] !== false;
       const isWorkspaceSelected = isWorkspaceActive && selectionLevel === "workspace";
-      const isLocalWorkspaceNode = workspace.kind === "local";
+      const isWorkspaceBeingRenamed = renamingWorkspaceId === workspace.id;
 
       return (
         <div key={workspace.id} className="tree-section tree-workspace-section">
           <div
             className={`tree-row tree-row-workspace tree-row-with-toggle${isWorkspaceSelected ? " is-selected" : ""}${projectDropWorkspaceId === workspace.id ? " is-drop-target" : ""}`}
             onClick={(e) => {
-              if (isRenamingLocalWorkspace && isLocalWorkspaceNode) return;
+              if (isWorkspaceBeingRenamed) return;
               void switchWorkspace(workspace.id, "workspace");
               if ((e.target as HTMLElement).closest(".tree-no-toggle")) return;
               toggleWorkspace(workspace.id);
             }}
             onDoubleClick={(e) => {
-              if (!isLocalWorkspaceNode) return;
               e.preventDefault();
               e.stopPropagation();
-              beginLocalWorkspaceRename();
+              beginWorkspaceRename(workspace.id);
             }}
             onDragOver={(e) => onWorkspaceProjectDragOver(e, workspace.id)}
             onDragEnter={(e) => onWorkspaceProjectDragOver(e, workspace.id)}
@@ -4588,21 +5166,23 @@ export default function WorkspaceEditorApp() {
             }}
           >
             <IconWorkspace />
-            {isLocalWorkspaceNode && isRenamingLocalWorkspace ? (
+            {isWorkspaceBeingRenamed ? (
               <input
                 autoFocus
                 className="ws-inline-input tree-no-toggle"
-                value={localWorkspaceNameDraft}
-                onChange={(e) => setLocalWorkspaceNameDraft(e.target.value)}
-                onBlur={commitLocalWorkspaceRename}
+                value={workspaceRenameDraft}
+                onChange={(e) => setWorkspaceRenameDraft(e.target.value)}
+                onBlur={() => {
+                  void commitWorkspaceRename();
+                }}
                 onClick={(e) => e.stopPropagation()}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
-                    commitLocalWorkspaceRename();
+                    void commitWorkspaceRename();
                   } else if (e.key === "Escape") {
                     e.preventDefault();
-                    cancelLocalWorkspaceRename();
+                    cancelWorkspaceRename();
                   }
                 }}
               />
@@ -4721,6 +5301,10 @@ export default function WorkspaceEditorApp() {
                               isWorkspaceActive &&
                               editingName?.kind === "project" &&
                               editingName.projectId === project.id;
+                            const isTransferUploading =
+                              (uploadingTransferTargets[
+                                transferUploadTargetKey(project.id, workspace.id)
+                              ] ?? 0) > 0;
 
                             return (
                               <div key={project.id}>
@@ -4810,6 +5394,13 @@ export default function WorkspaceEditorApp() {
                                   className={`tree-project-children${isProjExpanded ? " is-open" : ""}`}
                                 >
                                   <div className="tree-project-children-inner">
+                                    {isTransferUploading && (
+                                      <div className="tree-row tree-row-campaign tree-row-uploading">
+                                        <span className="tree-label tree-label-campaign">
+                                          Uploading...
+                                        </span>
+                                      </div>
+                                    )}
                                     {project.campaigns.map((campaign) => {
                                       const isCampSelected =
                                         isProjSelected && selection.campaignId === campaign.id;
@@ -4821,7 +5412,14 @@ export default function WorkspaceEditorApp() {
                                       return (
                                         <div
                                           key={campaign.id}
-                                          className={`tree-row tree-row-campaign${isCampSelected && selectionLevel === "campaign" ? " is-selected" : ""}${isWorkspaceActive && draggingCampaignId === campaign.id ? " is-dragging" : ""}`}
+                                          className={`tree-row tree-row-campaign${isCampSelected && selectionLevel === "campaign" ? " is-selected" : ""}${isWorkspaceActive && draggingCampaignId === campaign.id ? " is-dragging" : ""}${
+                                            campaignDropCampaignTarget ===
+                                            campaignRowDropTargetKey(campaign.id, workspace.id)
+                                              ? campaignDropCampaignPosition === "after"
+                                                ? " is-insert-after"
+                                                : " is-insert-before"
+                                              : ""
+                                          }`}
                                           onClick={() =>
                                             activateWorkspaceSelection(
                                               workspace.id,
@@ -4852,6 +5450,38 @@ export default function WorkspaceEditorApp() {
                                             });
                                           }}
                                           onDragEnd={onCampaignDragEnd}
+                                          onDragOver={(e) =>
+                                            onCampaignRowDragOver(
+                                              e,
+                                              workspace.id,
+                                              campaign.id
+                                            )
+                                          }
+                                          onDragEnter={(e) =>
+                                            onCampaignRowDragOver(
+                                              e,
+                                              workspace.id,
+                                              campaign.id
+                                            )
+                                          }
+                                          onDragLeave={() => {
+                                            if (
+                                              campaignDropCampaignTarget ===
+                                              campaignRowDropTargetKey(campaign.id, workspace.id)
+                                            ) {
+                                              setCampaignDropCampaignTarget(null);
+                                              setCampaignDropCampaignPosition("before");
+                                            }
+                                          }}
+                                          onDrop={(e) => {
+                                            void onCampaignRowDrop(
+                                              e,
+                                              workspace.id,
+                                              client.id,
+                                              project.id,
+                                              campaign.id
+                                            );
+                                          }}
                                         >
                                           {isEditingCamp ? (
                                             <input
@@ -4982,6 +5612,46 @@ export default function WorkspaceEditorApp() {
             <div className="tree-workspace-group-label">
               Shared
             </div>
+            {cloudEnabled && authUser && (
+              <div style={{ marginBottom: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                {incomingWorkspaceInvitesLoading ? (
+                  <div className="tree-workspace-meta">Loading invites...</div>
+                ) : incomingWorkspaceInvitesError ? (
+                  <div className="tree-workspace-meta tree-workspace-meta-error">
+                    {incomingWorkspaceInvitesError}
+                  </div>
+                ) : incomingWorkspaceInvites.length > 0 ? (
+                  incomingWorkspaceInvites.map((invite) => (
+                    <div
+                      key={invite.id}
+                      className="tree-workspace-meta"
+                      style={{
+                        border: "1px solid var(--line)",
+                        borderRadius: 10,
+                        padding: "8px 10px",
+                        background: "var(--surface)",
+                      }}
+                    >
+                      <div style={{ color: "var(--ink)", fontWeight: 600, marginBottom: 2 }}>
+                        Invite: {invite.workspaceName}
+                      </div>
+                      <div style={{ marginBottom: 6 }}>
+                        {invite.organizationName || "Organization"} · {invite.role}
+                      </div>
+                      <button
+                        className="btn btn-secondary btn-xs"
+                        onClick={() => {
+                          void acceptIncomingWorkspaceInvite(invite.id);
+                        }}
+                        type="button"
+                      >
+                        Accept
+                      </button>
+                    </div>
+                  ))
+                ) : null}
+              </div>
+            )}
             {sharedWorkspaces.length === 0 ? (
               <div className="tree-workspace-meta" style={{ marginBottom: 8 }}>
                 {cloudEnabled
@@ -4997,7 +5667,7 @@ export default function WorkspaceEditorApp() {
                 style={{ marginTop: 6 }}
                 onClick={createWorkspace}
               >
-                <IconPlus /> New Cloud Workspace
+                <IconPlus /> New Shared Workspace
               </button>
             )}
 
@@ -5026,6 +5696,10 @@ export default function WorkspaceEditorApp() {
   function renderWorkspaceView() {
     const counts = countWorkspaceEntities(data);
     const isLocalWorkspace = activeWorkspace.kind === "local";
+    const workspaceInvites = workspaceInvitesByWorkspace[activeWorkspaceId] ?? [];
+    const inviteManageDenied =
+      typeof workspaceInvitesError === "string" &&
+      workspaceInvitesError.toLowerCase().includes("only workspace owners");
     const updatedLabel = workspaceStorageEstimate
       ? new Date(workspaceStorageEstimate.generatedAtIso).toLocaleTimeString()
       : "—";
@@ -5050,27 +5724,42 @@ export default function WorkspaceEditorApp() {
         </div>
 
         <div className="form-section" style={{ overflowY: "auto" }}>
+          <div className="form-group">
+            <label className="form-label">Workspace Name</label>
+            <input
+              className="form-input"
+              value={workspaceNameFieldDraft}
+              onChange={(e) => setWorkspaceNameFieldDraft(e.target.value)}
+              onBlur={() => {
+                void commitWorkspaceNameField();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void commitWorkspaceNameField();
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  setWorkspaceNameFieldDraft(activeWorkspace.name);
+                }
+              }}
+              placeholder={DEFAULT_LOCAL_WORKSPACE_NAME}
+            />
+          </div>
+
+          {!isLocalWorkspace && (
+            <div className="form-group" style={{ marginTop: -6 }}>
+              <button
+                className="btn btn-danger btn-sm"
+                type="button"
+                onClick={deleteActiveWorkspace}
+              >
+                Delete Workspace
+              </button>
+            </div>
+          )}
+
           {isLocalWorkspace ? (
             <>
-              <div className="form-group">
-                <label className="form-label">Workspace Name</label>
-                <input
-                  className="form-input"
-                  value={workspaceNameFieldDraft}
-                  onChange={(e) => setWorkspaceNameFieldDraft(e.target.value)}
-                  onBlur={commitWorkspaceNameField}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      commitWorkspaceNameField();
-                    } else if (e.key === "Escape") {
-                      e.preventDefault();
-                      setWorkspaceNameFieldDraft(localWorkspace.name);
-                    }
-                  }}
-                  placeholder={DEFAULT_LOCAL_WORKSPACE_NAME}
-                />
-              </div>
               <div className="info-stat-block" style={{ gap: 10 }}>
                 <div
                   style={{
@@ -5185,15 +5874,141 @@ export default function WorkspaceEditorApp() {
               </div>
             </>
           ) : (
-            <div className="info-stat-block">
-              <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>
-                Cloud Workspace
+            <>
+              <div className="info-stat-block">
+                <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>
+                  Cloud Workspace
+                </div>
+                <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                  Browser storage estimates are shown for the Local Workspace. Cloud
+                  workspace storage and quotas are managed by Supabase.
+                </div>
               </div>
-              <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                Browser storage estimates are shown for the Local Workspace. Cloud
-                workspace storage and quotas are managed by Supabase.
+
+              <div className="info-stat-block" style={{ gap: 10 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>
+                  Workspace Access
+                </div>
+                {activeWorkspace.kind !== "organization" ? (
+                  <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                    Personal cloud workspaces are private. Create a new shared workspace
+                    to invite collaborators.
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                      Invite collaborators by email. Invites are scoped to this workspace.
+                    </div>
+                    {!inviteManageDenied && (
+                      <div className="form-row" style={{ alignItems: "end" }}>
+                        <div className="form-group" style={{ marginBottom: 0 }}>
+                          <label className="form-label">Invite Email</label>
+                          <input
+                            className="form-input"
+                            type="email"
+                            placeholder="name@company.com"
+                            value={workspaceInviteEmailDraft}
+                            onChange={(e) => setWorkspaceInviteEmailDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                void addWorkspaceInvite();
+                              }
+                            }}
+                          />
+                        </div>
+                        <div className="form-group" style={{ marginBottom: 0, maxWidth: 180 }}>
+                          <label className="form-label">Role</label>
+                          <div className="form-select-wrap">
+                            <select
+                              className="form-select"
+                              value={workspaceInviteRoleDraft}
+                              onChange={(e) =>
+                                setWorkspaceInviteRoleDraft(
+                                  e.target.value === "owner" ? "owner" : "member"
+                                )
+                              }
+                            >
+                              <option value="member">Member</option>
+                              <option value="owner">Owner</option>
+                            </select>
+                          </div>
+                        </div>
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          type="button"
+                          onClick={() => void addWorkspaceInvite()}
+                          disabled={!workspaceInviteEmailDraft.trim() || workspaceInvitesSaving}
+                          style={{ marginBottom: 6 }}
+                        >
+                          {workspaceInvitesSaving ? "Saving..." : "Add Invite"}
+                        </button>
+                      </div>
+                    )}
+                    {workspaceInvitesError && (
+                      <div style={{ fontSize: 12, color: "var(--danger)" }}>
+                        {workspaceInvitesError}
+                      </div>
+                    )}
+                    {workspaceInvitesLoading ? (
+                      <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                        Loading invites...
+                      </div>
+                    ) : workspaceInvites.length === 0 ? (
+                      <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                        No pending invites.
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {workspaceInvites.map((invite) => (
+                          <div
+                            key={invite.id}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              gap: 10,
+                              border: "1px solid var(--line)",
+                              borderRadius: 10,
+                              padding: "8px 10px",
+                            }}
+                          >
+                            <div style={{ minWidth: 0 }}>
+                              <div
+                                style={{
+                                  color: "var(--ink)",
+                                  fontSize: 13,
+                                  fontWeight: 600,
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                }}
+                              >
+                                {invite.email}
+                              </div>
+                              <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                                {invite.role === "owner" ? "Owner" : "Member"} · Expires{" "}
+                                {new Date(invite.expiresAt).toLocaleDateString()}
+                              </div>
+                            </div>
+                            {!inviteManageDenied && (
+                              <button
+                                className="btn btn-ghost btn-xs"
+                                type="button"
+                                onClick={() => void removeWorkspaceInvite(invite.id)}
+                                title="Revoke invite"
+                                disabled={workspaceInvitesSaving}
+                              >
+                                Remove
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
-            </div>
+            </>
           )}
 
           <div className="info-stat-grid">
