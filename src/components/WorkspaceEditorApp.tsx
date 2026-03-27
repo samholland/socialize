@@ -652,6 +652,12 @@ async function localMediaStoragePathForBlob(blob: Blob): Promise<string> {
   return `${LOCAL_MEDIA_PATH_PREFIX}${hash}`;
 }
 
+function fallbackLocalMediaStoragePath(): string {
+  return `${LOCAL_MEDIA_PATH_PREFIX}fallback_${Date.now()}_${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+}
+
 function isQuotaExceededStorageError(error: unknown): boolean {
   if (!(error instanceof DOMException)) return false;
   return (
@@ -2249,6 +2255,41 @@ export default function WorkspaceEditorApp() {
     return lookup.byCampaignId.get(campaign.id) ?? null;
   }
 
+  async function persistLocalMediaAssetWithFallback(
+    workspaceId: string,
+    campaignId: string,
+    input: {
+      blob: Blob;
+      kind: "image" | "video";
+      mimeType: string;
+      fileName: string;
+      preferredStoragePath?: string;
+    }
+  ): Promise<{ ok: boolean; storagePath: string }> {
+    const candidates: string[] = [];
+    if (input.preferredStoragePath) candidates.push(input.preferredStoragePath);
+    try {
+      if (!input.preferredStoragePath) {
+        candidates.push(await localMediaStoragePathForBlob(input.blob));
+      }
+    } catch {
+      // Hashing can fail for very large files; fall back to random path.
+    }
+    candidates.push(fallbackLocalMediaStoragePath());
+
+    for (const storagePath of candidates) {
+      const ok = await putLocalMediaAsset(workspaceId, storagePath, {
+        campaignId,
+        kind: input.kind,
+        blob: input.blob,
+        mimeType: input.mimeType,
+        fileName: input.fileName,
+      });
+      if (ok) return { ok: true, storagePath };
+    }
+    return { ok: false, storagePath: "" };
+  }
+
   function applyCampaignMediaUpdate(
     nextData: AppData,
     campaignId: string,
@@ -2656,19 +2697,18 @@ export default function WorkspaceEditorApp() {
     }
 
     if (targetWorkspace.kind === "local") {
-      const storagePath = isLocalMediaStoragePath(sourceCampaign.mediaStoragePath)
-        ? sourceCampaign.mediaStoragePath
-        : await localMediaStoragePathForBlob(blob);
-      const persisted = await putLocalMediaAsset(targetWorkspaceId, storagePath, {
-        campaignId: targetCampaignId,
-        kind: mediaKind,
+      const persisted = await persistLocalMediaAssetWithFallback(targetWorkspaceId, targetCampaignId, {
         blob,
+        kind: mediaKind,
         mimeType,
         fileName,
+        preferredStoragePath: isLocalMediaStoragePath(sourceCampaign.mediaStoragePath)
+          ? sourceCampaign.mediaStoragePath
+          : undefined,
       });
-      if (!persisted) return null;
+      if (!persisted.ok) return null;
       return {
-        mediaStoragePath: storagePath,
+        mediaStoragePath: persisted.storagePath,
         mediaKind,
         mediaMimeType: mimeType,
       };
@@ -2740,18 +2780,20 @@ export default function WorkspaceEditorApp() {
 
     const url = URL.createObjectURL(file);
     const mediaKind: "image" | "video" = file.type.startsWith("video/") ? "video" : "image";
-    const storagePath = await localMediaStoragePathForFile(file);
-    const persisted = await putLocalMediaAsset(activeWorkspaceId, storagePath, {
-      campaignId,
-      kind: mediaKind,
+    const persisted = await persistLocalMediaAssetWithFallback(activeWorkspaceId, campaignId, {
       blob: file,
+      kind: mediaKind,
       mimeType: file.type,
       fileName: file.name,
     });
-    if (!persisted) {
+    if (!persisted.ok) {
       console.warn("Failed to persist local media in IndexedDB.");
     }
     setCampaignMedia(campaignId, { kind: mediaKind, url });
+    const effectiveStoragePath = persisted.ok ? persisted.storagePath : "";
+    if (!persisted.ok) {
+      alert("Local media could not be persisted to IndexedDB. The media will be visible for now, but may be lost on refresh.");
+    }
     const nextData: AppData = {
       clients: data.clients.map((client) => ({
         ...client,
@@ -2761,7 +2803,7 @@ export default function WorkspaceEditorApp() {
             campaign.id === campaignId
               ? {
                   ...campaign,
-                  mediaStoragePath: storagePath,
+                  mediaStoragePath: effectiveStoragePath,
                   mediaKind,
                   mediaMimeType: file.type,
                   updatedAt: nowIso(),
