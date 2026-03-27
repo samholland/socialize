@@ -31,6 +31,7 @@ import {
   listLocalWorkspaceStates,
   putLocalMediaAsset,
   setLocalWorkspaceState,
+  type LocalMediaAsset,
 } from "@/lib/local/indexedDb";
 
 // ─── Types ───────────────────────────────────────────────────────
@@ -624,6 +625,11 @@ async function sha256Hex(blob: Blob): Promise<string> {
 
 async function localMediaStoragePathForFile(file: File): Promise<string> {
   const hash = await sha256Hex(file);
+  return `${LOCAL_MEDIA_PATH_PREFIX}${hash}`;
+}
+
+async function localMediaStoragePathForBlob(blob: Blob): Promise<string> {
+  const hash = await sha256Hex(blob);
   return `${LOCAL_MEDIA_PATH_PREFIX}${hash}`;
 }
 
@@ -2173,6 +2179,49 @@ export default function WorkspaceEditorApp() {
     return refs;
   }
 
+  type LocalMediaLookup = {
+    byPath: Map<string, LocalMediaAsset>;
+    byCampaignId: Map<string, LocalMediaAsset>;
+  };
+
+  type TransferredCampaignMedia = {
+    mediaStoragePath: string;
+    mediaKind: "image" | "video";
+    mediaMimeType: string;
+  };
+
+  function mediaKindFromCampaign(campaign: Campaign): "image" | "video" | null {
+    return inferMediaKind(campaign.mediaKind, campaign.mediaMimeType);
+  }
+
+  function mediaFileNameFromPath(path: string | undefined, fallbackKind: "image" | "video"): string {
+    const candidate = path?.split("/").pop()?.trim();
+    if (candidate) return candidate;
+    return fallbackKind === "video" ? "media.mp4" : "media.png";
+  }
+
+  async function buildLocalMediaLookup(workspaceId: string): Promise<LocalMediaLookup> {
+    const assets = await listLocalMediaAssetsForWorkspace(workspaceId);
+    const byPath = new Map<string, LocalMediaAsset>();
+    const byCampaignId = new Map<string, LocalMediaAsset>();
+    for (const asset of assets) {
+      if (asset.storagePath) byPath.set(asset.storagePath, asset);
+      if (asset.campaignId) byCampaignId.set(asset.campaignId, asset);
+    }
+    return { byPath, byCampaignId };
+  }
+
+  function localAssetForCampaign(
+    lookup: LocalMediaLookup,
+    campaign: Campaign
+  ): LocalMediaAsset | null {
+    if (campaign.mediaStoragePath) {
+      const byPath = lookup.byPath.get(campaign.mediaStoragePath);
+      if (byPath) return byPath;
+    }
+    return lookup.byCampaignId.get(campaign.id) ?? null;
+  }
+
   async function hydrateLocalMediaForWorkspace(
     workspaceId: string,
     nextData: AppData
@@ -2389,6 +2438,195 @@ export default function WorkspaceEditorApp() {
       throw new Error("Media URL was not generated.");
     }
     return { kind: mediaKind, url: signedUrl, storagePath: path };
+  }
+
+  async function uploadBlobToCloudWorkspace(
+    workspaceId: string,
+    campaignId: string,
+    input: {
+      blob: Blob;
+      fileName: string;
+      mimeType: string;
+      mediaKind: "image" | "video";
+    }
+  ): Promise<TransferredCampaignMedia> {
+    if (!supabase) {
+      throw new Error("You must be signed in to upload media.");
+    }
+    const accessToken = await getSessionAccessToken();
+    if (!accessToken) {
+      throw new Error("You must be signed in to upload media.");
+    }
+
+    const signRes = await fetch("/api/media/sign-upload", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        workspaceId,
+        campaignId,
+        fileName: input.fileName,
+        contentType: input.mimeType,
+      }),
+    });
+    if (!signRes.ok) {
+      throw new Error("Failed to start upload.");
+    }
+    const signJson = (await signRes.json()) as { path: string; token: string };
+    const { path, token } = signJson;
+    if (!path || !token) throw new Error("Upload token missing.");
+
+    const file = new File([input.blob], input.fileName, { type: input.mimeType });
+    const uploadRes = await supabase.storage
+      .from(process.env.NEXT_PUBLIC_SUPABASE_MEDIA_BUCKET || "campaign-media")
+      .uploadToSignedUrl(path, token, file);
+    if (uploadRes.error) {
+      throw uploadRes.error;
+    }
+
+    const finalizeRes = await fetch("/api/media/finalize", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        workspaceId,
+        campaignId,
+        path,
+        mediaKind: input.mediaKind,
+        mimeType: input.mimeType,
+        sizeBytes: file.size,
+      }),
+    });
+    if (!finalizeRes.ok) {
+      throw new Error("Failed to finalize uploaded media.");
+    }
+
+    return {
+      mediaStoragePath: path,
+      mediaKind: input.mediaKind,
+      mediaMimeType: input.mimeType,
+    };
+  }
+
+  async function downloadCloudMediaBlob(
+    workspaceId: string,
+    storagePath: string,
+    fallbackKind: "image" | "video"
+  ): Promise<{ blob: Blob; fileName: string }> {
+    const accessToken = await getSessionAccessToken();
+    if (!accessToken) {
+      throw new Error("You must be signed in to move media.");
+    }
+    const readRes = await fetch("/api/media/sign-read", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        workspaceId,
+        paths: [storagePath],
+      }),
+    });
+    if (!readRes.ok) {
+      throw new Error("Failed to fetch media URL.");
+    }
+    const readJson = (await readRes.json()) as { urls?: Record<string, string> };
+    const signedUrl = readJson.urls?.[storagePath];
+    if (!signedUrl) {
+      throw new Error("Media URL was not generated.");
+    }
+
+    const downloadRes = await fetch(signedUrl);
+    if (!downloadRes.ok) {
+      throw new Error("Failed to download media.");
+    }
+    const blob = await downloadRes.blob();
+    const inferredKind = blob.type.startsWith("video/")
+      ? "video"
+      : blob.type.startsWith("image/")
+        ? "image"
+        : fallbackKind;
+    const fileName = mediaFileNameFromPath(storagePath, inferredKind);
+    return { blob, fileName };
+  }
+
+  async function transferCampaignMediaBetweenWorkspaces(
+    sourceWorkspaceId: string,
+    targetWorkspaceId: string,
+    sourceCampaign: Campaign,
+    targetCampaignId: string,
+    sourceLocalLookup?: LocalMediaLookup
+  ): Promise<TransferredCampaignMedia | null> {
+    if (!sourceCampaign.mediaStoragePath) return null;
+    const sourceKind = mediaKindFromCampaign(sourceCampaign);
+    if (!sourceKind) return null;
+
+    const sourceWorkspace = workspaces.find((workspace) => workspace.id === sourceWorkspaceId);
+    const targetWorkspace = workspaces.find((workspace) => workspace.id === targetWorkspaceId);
+    if (!sourceWorkspace || !targetWorkspace) return null;
+
+    let blob: Blob;
+    let mimeType: string;
+    let fileName: string;
+    let mediaKind: "image" | "video" = sourceKind;
+
+    if (sourceWorkspace.kind === "local") {
+      const lookup = sourceLocalLookup ?? (await buildLocalMediaLookup(sourceWorkspaceId));
+      const localAsset = localAssetForCampaign(lookup, sourceCampaign);
+      if (!localAsset) return null;
+      blob = localAsset.blob;
+      mimeType =
+        localAsset.mimeType ||
+        sourceCampaign.mediaMimeType ||
+        (localAsset.kind === "video" ? "video/mp4" : "image/png");
+      fileName =
+        localAsset.fileName || mediaFileNameFromPath(sourceCampaign.mediaStoragePath, localAsset.kind);
+      mediaKind = localAsset.kind;
+    } else {
+      const downloaded = await downloadCloudMediaBlob(
+        sourceWorkspaceId,
+        sourceCampaign.mediaStoragePath,
+        sourceKind
+      );
+      blob = downloaded.blob;
+      mimeType =
+        downloaded.blob.type ||
+        sourceCampaign.mediaMimeType ||
+        (sourceKind === "video" ? "video/mp4" : "image/png");
+      fileName = downloaded.fileName;
+      mediaKind = mimeType.startsWith("video/") ? "video" : "image";
+    }
+
+    if (targetWorkspace.kind === "local") {
+      const storagePath = isLocalMediaStoragePath(sourceCampaign.mediaStoragePath)
+        ? sourceCampaign.mediaStoragePath
+        : await localMediaStoragePathForBlob(blob);
+      const persisted = await putLocalMediaAsset(targetWorkspaceId, storagePath, {
+        campaignId: targetCampaignId,
+        kind: mediaKind,
+        blob,
+        mimeType,
+        fileName,
+      });
+      if (!persisted) return null;
+      return {
+        mediaStoragePath: storagePath,
+        mediaKind,
+        mediaMimeType: mimeType,
+      };
+    }
+
+    return await uploadBlobToCloudWorkspace(targetWorkspaceId, targetCampaignId, {
+      blob,
+      fileName,
+      mimeType,
+      mediaKind,
+    });
   }
 
   async function clearCampaignMediaInCloud(campaignId: string): Promise<void> {
@@ -3351,9 +3589,13 @@ export default function WorkspaceEditorApp() {
     );
     if (!sourceClient || !sourceProject) return;
 
-    const projectHasMedia = sourceProject.campaigns.some(
-      (campaign) => Boolean(campaign.mediaStoragePath)
+    const sourceWorkspace = workspaces.find(
+      (workspace) => workspace.id === sourceWorkspaceId
     );
+    const sourceLocalLookup =
+      sourceWorkspace?.kind === "local"
+        ? await buildLocalMediaLookup(sourceWorkspaceId)
+        : undefined;
 
     const movedProject: Project = {
       ...sourceProject,
@@ -3367,6 +3609,35 @@ export default function WorkspaceEditorApp() {
         updatedAt: nowIso(),
       })),
     };
+
+    let failedMediaTransfers = 0;
+    for (let i = 0; i < sourceProject.campaigns.length; i += 1) {
+      const sourceCampaign = sourceProject.campaigns[i];
+      const movedCampaign = movedProject.campaigns[i];
+      if (!sourceCampaign || !movedCampaign) continue;
+      if (!sourceCampaign.mediaStoragePath) continue;
+
+      try {
+        const transferred = await transferCampaignMediaBetweenWorkspaces(
+          sourceWorkspaceId,
+          targetWorkspaceId,
+          sourceCampaign,
+          movedCampaign.id,
+          sourceLocalLookup
+        );
+        if (!transferred) {
+          failedMediaTransfers += 1;
+          continue;
+        }
+        movedCampaign.mediaStoragePath = transferred.mediaStoragePath;
+        movedCampaign.mediaKind = transferred.mediaKind;
+        movedCampaign.mediaMimeType = transferred.mediaMimeType;
+      } catch (error) {
+        console.warn("Failed to transfer campaign media during project move", error);
+        failedMediaTransfers += 1;
+      }
+    }
+
     const removedCampaignIds = sourceProject.campaigns.map((campaign) => campaign.id);
 
     const sourceNext: AppData = {
@@ -3418,13 +3689,7 @@ export default function WorkspaceEditorApp() {
         sourceWorkspaceId,
         sourceNext,
         sourceSelection,
-        sourceSelection.campaignId
-          ? "campaign"
-          : sourceSelection.projectId
-            ? "project"
-            : sourceSelection.clientId
-              ? "client"
-              : "workspace"
+        selectionLevelFromSelection(sourceSelection)
       );
       await persistWorkspaceStateSnapshot(
         targetWorkspaceId,
@@ -3446,13 +3711,7 @@ export default function WorkspaceEditorApp() {
     cleanupCampaignMedia(removedCampaignIds);
 
     if (sourceWorkspaceId === activeWorkspaceId) {
-      const sourceLevel: SelectionLevel = sourceSelection.campaignId
-        ? "campaign"
-        : sourceSelection.projectId
-          ? "project"
-          : sourceSelection.clientId
-            ? "client"
-            : "workspace";
+      const sourceLevel: SelectionLevel = selectionLevelFromSelection(sourceSelection);
       setData(sourceNext);
       if (selection.projectId === sourceProjectId) {
         setSelection(sourceSelection);
@@ -3464,9 +3723,9 @@ export default function WorkspaceEditorApp() {
       setSelectionLevel("project");
     }
 
-    if (projectHasMedia) {
+    if (failedMediaTransfers > 0) {
       alert(
-        "Project moved. Media files were not transferred yet; please re-upload in the destination workspace."
+        `Project moved. ${failedMediaTransfers} media file${failedMediaTransfers === 1 ? "" : "s"} could not be transferred; please re-upload in the destination workspace.`
       );
     }
   }
@@ -3604,7 +3863,6 @@ export default function WorkspaceEditorApp() {
     const targetProject = targetClient?.projects.find((project) => project.id === targetProjectId);
     if (!targetClient || !targetProject) return;
 
-    const campaignHasMedia = Boolean(sourceCampaign.mediaStoragePath);
     const movedCampaign: Campaign = {
       ...sourceCampaign,
       id: newId("cmp"),
@@ -3613,6 +3871,35 @@ export default function WorkspaceEditorApp() {
       mediaMimeType: "",
       updatedAt: nowIso(),
     };
+    let failedMediaTransfer = false;
+    if (sourceCampaign.mediaStoragePath) {
+      try {
+        const sourceWorkspace = workspaces.find(
+          (workspace) => workspace.id === sourceWorkspaceId
+        );
+        const sourceLocalLookup =
+          sourceWorkspace?.kind === "local"
+            ? await buildLocalMediaLookup(sourceWorkspaceId)
+            : undefined;
+        const transferred = await transferCampaignMediaBetweenWorkspaces(
+          sourceWorkspaceId,
+          targetWorkspaceId,
+          sourceCampaign,
+          movedCampaign.id,
+          sourceLocalLookup
+        );
+        if (transferred) {
+          movedCampaign.mediaStoragePath = transferred.mediaStoragePath;
+          movedCampaign.mediaKind = transferred.mediaKind;
+          movedCampaign.mediaMimeType = transferred.mediaMimeType;
+        } else {
+          failedMediaTransfer = true;
+        }
+      } catch (error) {
+        console.warn("Failed to transfer campaign media during campaign move", error);
+        failedMediaTransfer = true;
+      }
+    }
 
     const sourceNext: AppData = {
       clients: sourceData.clients.map((client) => {
@@ -3698,9 +3985,9 @@ export default function WorkspaceEditorApp() {
       setSelectionLevel("campaign");
     }
 
-    if (campaignHasMedia) {
+    if (failedMediaTransfer) {
       alert(
-        "Ad moved. Media files were not transferred yet; please re-upload in the destination workspace."
+        "Ad moved. Media could not be transferred; please re-upload in the destination workspace."
       );
     }
   }
