@@ -4,6 +4,7 @@ export type CloudWorkspace = {
   id: string;
   name: string;
   kind: "personal" | "organization";
+  revision: number;
 };
 
 export type CloudCampaign = {
@@ -50,6 +51,13 @@ export type CloudClient = {
 
 export type CloudAppData = { clients: CloudClient[] };
 
+export class CloudWorkspaceConflictError extends Error {
+  constructor(message = "Workspace revision conflict.") {
+    super(message);
+    this.name = "CloudWorkspaceConflictError";
+  }
+}
+
 function normalizeSupabaseErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) return error.message;
   if (error && typeof error === "object") {
@@ -75,7 +83,7 @@ export async function ensureProfileAndPersonalWorkspace(
 
   const { data: existingPersonal, error: personalErr } = await supabase
     .from("workspaces")
-    .select("id,name,type")
+    .select("id,name,type,revision")
     .eq("type", "personal")
     .eq("owner_user_id", user.id)
     .order("created_at", { ascending: true })
@@ -88,10 +96,15 @@ export async function ensureProfileAndPersonalWorkspace(
       id: existingPersonal.id,
       name: existingPersonal.name,
       kind: "personal",
+      revision:
+        typeof existingPersonal.revision === "number"
+          ? existingPersonal.revision
+          : 0,
     };
   }
 
-  const workspaceId = `ws_${crypto.randomUUID().slice(0, 8)}`;
+  // Deterministic id avoids duplicate personal workspaces under concurrent bootstraps.
+  const workspaceId = `ws_personal_${user.id}`;
   const workspaceName = "My Workspace";
   const { error: createErr } = await supabase.from("workspaces").insert({
     id: workspaceId,
@@ -99,12 +112,28 @@ export async function ensureProfileAndPersonalWorkspace(
     owner_user_id: user.id,
     name: workspaceName,
   });
-  if (createErr) throw createErr;
+  if (createErr && createErr.code !== "23505") throw createErr;
+
+  const { data: resolvedPersonal, error: resolvedErr } = await supabase
+    .from("workspaces")
+    .select("id,name,type,revision")
+    .eq("type", "personal")
+    .eq("owner_user_id", user.id)
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (resolvedErr || !resolvedPersonal) {
+    throw resolvedErr ?? new Error("Unable to resolve personal workspace.");
+  }
 
   return {
-    id: workspaceId,
-    name: workspaceName,
+    id: resolvedPersonal.id,
+    name: resolvedPersonal.name,
     kind: "personal",
+    revision:
+      typeof resolvedPersonal.revision === "number"
+        ? resolvedPersonal.revision
+        : 0,
   };
 }
 
@@ -114,7 +143,7 @@ export async function listAccessibleWorkspaces(
 ): Promise<CloudWorkspace[]> {
   const { data: personalRows, error: personalErr } = await supabase
     .from("workspaces")
-    .select("id,name,type")
+    .select("id,name,type,revision")
     .eq("type", "personal")
     .eq("owner_user_id", userId)
     .order("created_at", { ascending: true });
@@ -127,11 +156,11 @@ export async function listAccessibleWorkspaces(
   if (membershipErr) throw membershipErr;
 
   const orgIds = Array.from(new Set((memberships ?? []).map((m) => m.organization_id).filter(Boolean)));
-  let orgRows: Array<{ id: string; name: string; type: string }> = [];
+  let orgRows: Array<{ id: string; name: string; type: string; revision: number | null }> = [];
   if (orgIds.length > 0) {
     const { data, error } = await supabase
       .from("workspaces")
-      .select("id,name,type")
+      .select("id,name,type,revision")
       .eq("type", "organization")
       .in("organization_id", orgIds)
       .order("created_at", { ascending: true });
@@ -139,16 +168,27 @@ export async function listAccessibleWorkspaces(
     orgRows = data ?? [];
   }
 
+  const personalWorkspace = (personalRows ?? [])[0];
+
   return [
-    ...(personalRows ?? []).map((w) => ({
-      id: w.id,
-      name: w.name,
-      kind: "personal" as const,
-    })),
+    ...(personalWorkspace
+      ? [
+          {
+            id: personalWorkspace.id,
+            name: personalWorkspace.name,
+            kind: "personal" as const,
+            revision:
+              typeof personalWorkspace.revision === "number"
+                ? personalWorkspace.revision
+                : 0,
+          },
+        ]
+      : []),
     ...orgRows.map((w) => ({
       id: w.id,
       name: w.name,
       kind: "organization" as const,
+      revision: typeof w.revision === "number" ? w.revision : 0,
     })),
   ];
 }
@@ -180,6 +220,7 @@ export async function createOrganizationWorkspace(
     id: row.id,
     name: row.name,
     kind: "organization",
+    revision: 0,
   };
 }
 
@@ -208,7 +249,32 @@ export async function convertWorkspaceToOrganization(
     id: row.id,
     name: row.name,
     kind: row.kind === "organization" ? "organization" : "personal",
+    revision: 0,
   };
+}
+
+async function bumpWorkspaceRevisionIfExpected(
+  supabase: SupabaseClient,
+  workspaceId: string,
+  expectedRevision: number
+): Promise<number> {
+  const { data, error } = await supabase.rpc("bump_workspace_revision_if_expected", {
+    p_workspace_id: workspaceId,
+    p_expected_revision: expectedRevision,
+  });
+  if (error) {
+    const message = normalizeSupabaseErrorMessage(error, "Unable to save workspace.");
+    if (message.toLowerCase().includes("revision conflict")) {
+      throw new CloudWorkspaceConflictError(
+        "This workspace changed in another session. Reload or overwrite to continue."
+      );
+    }
+    throw new Error(message);
+  }
+  if (typeof data !== "number" || !Number.isFinite(data)) {
+    throw new Error("Workspace save returned an invalid revision.");
+  }
+  return Math.max(0, Math.floor(data));
 }
 
 export async function loadWorkspaceData(
@@ -334,8 +400,15 @@ export async function saveWorkspaceData(
   supabase: SupabaseClient,
   workspaceId: string,
   data: CloudAppData,
-  userId: string
-) {
+  userId: string,
+  expectedRevision: number
+): Promise<{ revision: number }> {
+  const nextRevision = await bumpWorkspaceRevisionIfExpected(
+    supabase,
+    workspaceId,
+    Math.max(0, Math.floor(expectedRevision))
+  );
+
   const clients = data.clients ?? [];
   const projects = clients.flatMap((c) => c.projects.map((p) => ({ ...p, clientId: c.id })));
   const campaigns = projects.flatMap((p) => p.campaigns.map((c) => ({ ...c, projectId: p.id })));
@@ -450,4 +523,6 @@ export async function saveWorkspaceData(
       .upsert(activeMedia, { onConflict: "storage_path" });
     if (error) throw error;
   }
+
+  return { revision: nextRevision };
 }

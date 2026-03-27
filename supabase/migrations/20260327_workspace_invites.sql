@@ -345,6 +345,7 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+#variable_conflict use_column
 declare
   v_email text := lower(trim(coalesce(auth.jwt() ->> 'email', '')));
 begin
@@ -387,6 +388,7 @@ language plpgsql
 security definer
 set search_path = public
 as $$
+#variable_conflict use_column
 declare
   v_user_id uuid := auth.uid();
   v_email text := lower(trim(coalesce(auth.jwt() ->> 'email', '')));
@@ -423,7 +425,7 @@ begin
 
   insert into public.organization_memberships (organization_id, user_id, role)
   values (v_invite.organization_id, v_user_id, v_invite.role)
-  on conflict (organization_id, user_id)
+  on conflict on constraint organization_memberships_pkey
   do update
     set role = case
       when public.organization_memberships.role = 'owner' then 'owner'
