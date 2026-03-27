@@ -4031,7 +4031,7 @@ export default function WorkspaceEditorApp() {
                 </div>
               </div>
 
-              {isInstagramFeed && (
+              {(isInstagramFeed || isFacebookFeed) && (
                 <div className="form-group">
                   <label className="form-label">Engagement</label>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

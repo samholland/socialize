@@ -292,6 +292,39 @@ function instagramEngagementCounts(
   };
 }
 
+function facebookEngagementCounts(
+  preset: "low" | "medium" | "high",
+  seed: number
+): { reactions: string; comments: string; shares: string } {
+  const rng = mulberry32((seed ^ 0x9e3779b9) >>> 0 || 1);
+  const ranges =
+    preset === "high"
+      ? {
+          reactions: [8_000, 95_000],
+          comments: [300, 8_500],
+          shares: [100, 3_200],
+        }
+      : preset === "low"
+        ? {
+            reactions: [45, 650],
+            comments: [2, 90],
+            shares: [1, 40],
+          }
+        : {
+            reactions: [900, 14_000],
+            comments: [40, 1_400],
+            shares: [10, 520],
+          };
+
+  return {
+    reactions: formatCompactCount(
+      randomInt(rng, ranges.reactions[0], ranges.reactions[1])
+    ),
+    comments: formatCompactCount(randomInt(rng, ranges.comments[0], ranges.comments[1])),
+    shares: formatCompactCount(randomInt(rng, ranges.shares[0], ranges.shares[1])),
+  };
+}
+
 async function drawInstagramFeedSurface(args: DrawFeedSurfaceArgs) {
   const {
     ctx,
@@ -531,6 +564,8 @@ async function drawFacebookFeedSurface(args: DrawFeedSurfaceArgs) {
     clientName,
     clientVerified,
     clientAvatarUrl,
+    engagementPreset = "medium",
+    engagementSeed = 1,
     loadImageFromUrl,
   } = args;
 
@@ -665,11 +700,16 @@ async function drawFacebookFeedSurface(args: DrawFeedSurfaceArgs) {
   ctx.fillStyle = "#ffffff";
   const reactionsH = 36 * s;
   ctx.fillRect(cardX, y, cardW, reactionsH);
+  const engagement = facebookEngagementCounts(engagementPreset, engagementSeed);
   ctx.fillStyle = "#65676b";
   ctx.font = `500 ${14 * s}px ${FONT_STACK}`;
-  ctx.fillText("8.6K", cardX + 23 * s, y + 24 * s);
+  ctx.fillText(engagement.reactions, cardX + 23 * s, y + 24 * s);
   ctx.textAlign = "right";
-  ctx.fillText("3.7K comments · 588 shares", cardX + cardW - 8 * s, y + 24 * s);
+  ctx.fillText(
+    `${engagement.comments} comments · ${engagement.shares} shares`,
+    cardX + cardW - 8 * s,
+    y + 24 * s
+  );
   ctx.textAlign = "left";
   ctx.fillStyle = "#2f73ff";
   ctx.beginPath();
