@@ -4327,12 +4327,24 @@ export default function WorkspaceEditorApp() {
     const isOverlayCampaign = false;
     const storyOffsetKey = storyCtaOffsetKey(campaign.id);
     const storyOffset = storyCtaOffsets[storyOffsetKey] ?? { x: 0, y: 0 };
+    const previewBackdropColor = normalizeHex(
+      mockupBackdropColor,
+      DEFAULT_MOCKUP_BACKDROP
+    );
     const debugUpdatedLabel = localDebugStats
       ? new Date(localDebugStats.generatedAtIso).toLocaleTimeString()
       : "—";
 
     return (
-      <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          height: "100%",
+          overflow: "hidden",
+          backgroundColor: previewBackdropColor,
+        }}
+      >
         {/* Toolbar */}
         <div className="preview-toolbar">
           <input
@@ -4561,6 +4573,7 @@ export default function WorkspaceEditorApp() {
           ref={previewBodyRef}
           onDrop={onPreviewDrop}
           onDragOver={onPreviewDragOver}
+          style={{ backgroundColor: previewBackdropColor }}
         >
           {debugPanelOpen && (
             <div className="local-debug-panel">
