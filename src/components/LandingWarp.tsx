@@ -32,7 +32,7 @@ function respawnParticle(p: WarpParticle) {
   p.z = randomBetween(0.12, 1.25);
   p.speed = randomBetween(1.35, 2.3);
   p.iconIndex = Math.floor(Math.random() * WARP_ICONS.length);
-  p.size = randomBetween(10, 20);
+  p.size = randomBetween(10, 40);
   p.rotation = randomBetween(0, Math.PI * 2);
   p.spin = randomBetween(-0.7, 0.7);
 }

@@ -52,6 +52,8 @@ type Props = {
   transparentPngExport?: boolean;
   storyCtaOffsetX?: number;
   storyCtaOffsetY?: number;
+  engagementPreset?: "low" | "medium" | "high";
+  engagementSeed?: number;
   onStoryCtaOffsetChange?: (offsetX: number, offsetY: number) => void;
   onMediaChange: (media: PreviewMedia) => void;
   onMediaFileSelected?: (file: File) => void;
@@ -219,6 +221,8 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     transparentPngExport = false,
     storyCtaOffsetX = 0,
     storyCtaOffsetY = 0,
+    engagementPreset = "medium",
+    engagementSeed = 1,
     onStoryCtaOffsetChange,
     onMediaChange,
     onMediaFileSelected,
@@ -394,6 +398,8 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
         media,
         video: videoRef.current,
         loadImageFromUrl,
+        engagementPreset,
+        engagementSeed,
       });
 
       if (frameImageRef.current) {
@@ -569,6 +575,8 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     transparentPngExport,
     storyCtaOffsetX,
     storyCtaOffsetY,
+    engagementPreset,
+    engagementSeed,
     isDragging,
     isStoryCtaDragging,
     frameVersion,

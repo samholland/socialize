@@ -18,4 +18,6 @@ export type DrawFeedSurfaceArgs = {
   media: PreviewMedia;
   video: HTMLVideoElement | null;
   loadImageFromUrl: (url: string | undefined) => Promise<HTMLImageElement | null>;
+  engagementPreset?: "low" | "medium" | "high";
+  engagementSeed?: number;
 };

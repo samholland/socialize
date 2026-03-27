@@ -49,6 +49,7 @@ type CtaOption = "Learn More" | "Shop Now" | "Sign Up" | "Download";
 type MediaAspect = "1:1" | "3:4" | "9:16";
 type CampaignObjective = "Awareness" | "Consideration" | "Conversion";
 type CampaignStatus = "draft" | "ready";
+type EngagementPreset = "low" | "medium" | "high";
 type SelectionLevel = "client" | "project" | "campaign";
 // EditorMode kept minimal — Campaign tab removed, only Ad editor remains
 
@@ -180,6 +181,8 @@ const OBJECTIVE_OPTIONS: CampaignObjective[] = [
   "Conversion",
 ];
 const FEED_ASPECT_OPTIONS: MediaAspect[] = ["1:1", "3:4"];
+const ENGAGEMENT_PRESET_OPTIONS: EngagementPreset[] = ["low", "medium", "high"];
+const DEFAULT_ENGAGEMENT_PRESET: EngagementPreset = "medium";
 const DEFAULT_CTA_BG = "#f2f2f2";
 const EMPTY_MEDIA: PreviewMedia = { kind: "none" };
 
@@ -194,6 +197,24 @@ function newId(prefix: string): string {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function stableSeedFromText(value: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) || 1;
+}
+
+function randomEngagementSeed(): number {
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    const buf = new Uint32Array(1);
+    crypto.getRandomValues(buf);
+    return (buf[0] >>> 0) || 1;
+  }
+  return Math.max(1, Math.floor(Math.random() * 0xffffffff));
 }
 
 function isStoryPlatform(p: Platform): boolean {
@@ -762,6 +783,7 @@ type UiPrefs = {
   expandedClients: Record<string, boolean>;
   expandedProjects: Record<string, boolean>;
   storyCtaOffsets: Record<string, { x: number; y: number }>;
+  engagementSettings: Record<string, { preset: EngagementPreset; seed: number }>;
 };
 
 function normalizeBooleanRecord(
@@ -794,6 +816,23 @@ function normalizeStoryCtaOffsets(
   }, {});
 }
 
+function normalizeEngagementSettings(
+  value: unknown
+): Record<string, { preset: EngagementPreset; seed: number }> {
+  if (!value || typeof value !== "object") return {};
+  return Object.entries(value as Record<string, unknown>).reduce<
+    Record<string, { preset: EngagementPreset; seed: number }>
+  >((acc, [key, entry]) => {
+    if (!entry || typeof entry !== "object") return acc;
+    const preset = (entry as { preset?: unknown }).preset;
+    const seed = (entry as { seed?: unknown }).seed;
+    if (preset !== "low" && preset !== "medium" && preset !== "high") return acc;
+    if (typeof seed !== "number" || !Number.isFinite(seed)) return acc;
+    acc[key] = { preset, seed: Math.max(1, Math.floor(seed)) };
+    return acc;
+  }, {});
+}
+
 function loadUiPrefs(): UiPrefs {
   const fallback: UiPrefs = {
     panelWidths: [260, 420],
@@ -808,6 +847,7 @@ function loadUiPrefs(): UiPrefs {
     expandedClients: {},
     expandedProjects: {},
     storyCtaOffsets: {},
+    engagementSettings: {},
   };
   if (typeof window === "undefined") return fallback;
   try {
@@ -826,6 +866,10 @@ function loadUiPrefs(): UiPrefs {
       expandedClients?: Record<string, boolean>;
       expandedProjects?: Record<string, boolean>;
       storyCtaOffsets?: Record<string, { x: number; y: number }>;
+      engagementSettings?: Record<
+        string,
+        { preset: EngagementPreset; seed: number }
+      >;
     };
     const opacity =
       typeof parsed.igFeedOverlayOpacity === "number"
@@ -865,6 +909,7 @@ function loadUiPrefs(): UiPrefs {
       expandedClients: normalizeBooleanRecord(parsed.expandedClients),
       expandedProjects: normalizeBooleanRecord(parsed.expandedProjects),
       storyCtaOffsets: normalizeStoryCtaOffsets(parsed.storyCtaOffsets),
+      engagementSettings: normalizeEngagementSettings(parsed.engagementSettings),
     };
   } catch {
     return fallback;
@@ -1189,6 +1234,7 @@ export default function WorkspaceEditorApp() {
     setExpandedClients(ui.expandedClients);
     setExpandedProjects(ui.expandedProjects);
     setStoryCtaOffsets(ui.storyCtaOffsets);
+    setEngagementSettings(ui.engagementSettings);
   }, []);
 
   useEffect(() => {
@@ -1377,6 +1423,9 @@ export default function WorkspaceEditorApp() {
   const [storyCtaOffsets, setStoryCtaOffsets] = useState<
     Record<string, { x: number; y: number }>
   >({});
+  const [engagementSettings, setEngagementSettings] = useState<
+    Record<string, { preset: EngagementPreset; seed: number }>
+  >({});
   const [draggingCampaignId, setDraggingCampaignId] = useState<string | null>(null);
   const [draggingCampaignPayload, setDraggingCampaignPayload] =
     useState<CampaignDragPayload | null>(null);
@@ -1417,6 +1466,23 @@ export default function WorkspaceEditorApp() {
 
   function storyCtaOffsetKey(campaignId: string, workspaceId = activeWorkspaceId): string {
     return `${workspaceId}::story-cta::${campaignId}`;
+  }
+
+  function engagementSettingKey(campaignId: string, workspaceId = activeWorkspaceId): string {
+    return `${workspaceId}::engagement::${campaignId}`;
+  }
+
+  function engagementSettingForCampaign(
+    campaignId: string,
+    workspaceId = activeWorkspaceId
+  ): { preset: EngagementPreset; seed: number } {
+    const key = engagementSettingKey(campaignId, workspaceId);
+    return (
+      engagementSettings[key] ?? {
+        preset: DEFAULT_ENGAGEMENT_PRESET,
+        seed: stableSeedFromText(key),
+      }
+    );
   }
 
   const refreshLocalDebugStats = useCallback(async () => {
@@ -1601,6 +1667,7 @@ export default function WorkspaceEditorApp() {
         expandedClients,
         expandedProjects,
         storyCtaOffsets,
+        engagementSettings,
       })
     );
   }, [
@@ -1617,6 +1684,7 @@ export default function WorkspaceEditorApp() {
     expandedClients,
     expandedProjects,
     storyCtaOffsets,
+    engagementSettings,
   ]);
 
   useEffect(() => {
@@ -3869,9 +3937,12 @@ export default function WorkspaceEditorApp() {
 
     const campaign = selectedCampaign;
     const project = selectedProject;
+    const isInstagramFeed = campaign.platform === "Instagram Feed";
     const isInstagramStory = campaign.platform === "Instagram Story";
     const isFacebookFeed = campaign.platform === "Facebook Feed";
     const ctaColorDraft = ctaColorDrafts[campaign.id] ?? campaign.ctaBgColor;
+    const engagementKey = engagementSettingKey(campaign.id);
+    const engagement = engagementSettingForCampaign(campaign.id);
 
     function commitCtaColorDraft() {
       const normalized = normalizeHexInput(ctaColorDraft);
@@ -3959,6 +4030,49 @@ export default function WorkspaceEditorApp() {
                   )}
                 </div>
               </div>
+
+              {isInstagramFeed && (
+                <div className="form-group">
+                  <label className="form-label">Engagement</label>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div className="toggle-pill">
+                      {ENGAGEMENT_PRESET_OPTIONS.map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          className={`toggle-pill-btn ${engagement.preset === preset ? "is-active" : ""}`}
+                          onClick={() => {
+                            setEngagementSettings((prev) => ({
+                              ...prev,
+                              [engagementKey]: {
+                                preset,
+                                seed: prev[engagementKey]?.seed ?? engagement.seed,
+                              },
+                            }));
+                          }}
+                        >
+                          {preset[0].toUpperCase() + preset.slice(1)}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => {
+                        setEngagementSettings((prev) => ({
+                          ...prev,
+                          [engagementKey]: {
+                            preset: prev[engagementKey]?.preset ?? engagement.preset,
+                            seed: randomEngagementSeed(),
+                          },
+                        }));
+                      }}
+                    >
+                      Randomize
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {audienceOptions.length > 0 && (
                 <div className="form-group">
@@ -4208,6 +4322,7 @@ export default function WorkspaceEditorApp() {
 
     const campaign = selectedCampaign;
     const client = selectedClient;
+    const engagement = engagementSettingForCampaign(campaign.id);
     const isOverlayCampaign = false;
     const storyOffsetKey = storyCtaOffsetKey(campaign.id);
     const storyOffset = storyCtaOffsets[storyOffsetKey] ?? { x: 0, y: 0 };
@@ -4541,6 +4656,8 @@ export default function WorkspaceEditorApp() {
                   transparentPngExport={transparentPngExport}
                   storyCtaOffsetX={storyOffset.x}
                   storyCtaOffsetY={storyOffset.y}
+                  engagementPreset={engagement.preset}
+                  engagementSeed={engagement.seed}
                   onStoryCtaOffsetChange={(offsetX, offsetY) => {
                     setStoryCtaOffsets((prev) => {
                       const existing = prev[storyOffsetKey];

@@ -237,6 +237,61 @@ function wrappedLineCount(
   return lines;
 }
 
+function mulberry32(seed: number) {
+  let t = seed >>> 0;
+  return () => {
+    t += 0x6d2b79f5;
+    let r = Math.imul(t ^ (t >>> 15), t | 1);
+    r ^= r + Math.imul(r ^ (r >>> 7), r | 61);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function randomInt(rng: () => number, min: number, max: number): number {
+  const lo = Math.floor(min);
+  const hi = Math.floor(max);
+  if (hi <= lo) return lo;
+  return lo + Math.floor(rng() * (hi - lo + 1));
+}
+
+function formatCompactCount(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
+  return `${value}`;
+}
+
+function instagramEngagementCounts(
+  preset: "low" | "medium" | "high",
+  seed: number
+): { likes: string; comments: string; sends: string } {
+  const rng = mulberry32(seed || 1);
+
+  const ranges =
+    preset === "high"
+      ? {
+          likes: [4_000, 65_000],
+          comments: [120, 4_200],
+          sends: [40, 2_600],
+        }
+      : preset === "low"
+        ? {
+            likes: [35, 420],
+            comments: [2, 42],
+            sends: [1, 26],
+          }
+        : {
+            likes: [500, 8_400],
+            comments: [20, 520],
+            sends: [8, 280],
+          };
+
+  return {
+    likes: formatCompactCount(randomInt(rng, ranges.likes[0], ranges.likes[1])),
+    comments: formatCompactCount(randomInt(rng, ranges.comments[0], ranges.comments[1])),
+    sends: formatCompactCount(randomInt(rng, ranges.sends[0], ranges.sends[1])),
+  };
+}
+
 async function drawInstagramFeedSurface(args: DrawFeedSurfaceArgs) {
   const {
     ctx,
@@ -249,6 +304,8 @@ async function drawInstagramFeedSurface(args: DrawFeedSurfaceArgs) {
     clientName,
     clientVerified,
     clientAvatarUrl,
+    engagementPreset = "medium",
+    engagementSeed = 1,
     loadImageFromUrl,
   } = args;
 
@@ -356,15 +413,6 @@ async function drawInstagramFeedSurface(args: DrawFeedSurfaceArgs) {
   ctx.fillStyle = "#fff";
   ctx.fillRect(screen.x, actionsY, screen.w, actionsH);
 
-  if (heartIcon) {
-    drawTintedImage(ctx, heartIcon, { x: screen.x + 8 * s, y: actionsY + 0 * s, w: 29 * s, h: 29 * s }, "#111");
-  }
-  if (commentIcon) {
-    drawTintedImage(ctx, commentIcon, { x: screen.x + 63 * s, y: actionsY + 0 * s, w: 28 * s, h: 28 * s }, "#111");
-  }
-  if (sendIcon) {
-    drawTintedImage(ctx, sendIcon, { x: screen.x + 110 * s, y: actionsY - 1 * s, w: 29 * s, h: 29 * s }, "#111");
-  }
   if (bookmarkIcon) {
     drawTintedImage(
       ctx,
@@ -374,11 +422,61 @@ async function drawInstagramFeedSurface(args: DrawFeedSurfaceArgs) {
     );
   }
 
+  const counts = instagramEngagementCounts(engagementPreset, engagementSeed);
   ctx.fillStyle = "#2b2b2b";
   ctx.font = `700 ${12.5 * s}px ${FONT_STACK}`;
-  ctx.fillText("86", screen.x + 38 * s, actionsY + 19 * s);
-  ctx.fillText("11", screen.x + 92 * s, actionsY + 19 * s);
-  ctx.fillText("3", screen.x + 141 * s, actionsY + 19 * s);
+
+  const metrics = [counts.likes, counts.comments, counts.sends];
+  const iconWidths = [29 * s, 28 * s, 29 * s];
+  const iconToTextGap = 4 * s;
+  const defaultGroupGap = 16 * s;
+  const minGroupGap = 8 * s;
+  const contentWidthNoGroupGap = metrics.reduce((sum, label, index) => {
+    return sum + iconWidths[index] + iconToTextGap + ctx.measureText(label).width;
+  }, 0);
+  const metricsStartX = screen.x + 8 * s;
+  const bookmarkLeftX = screen.x + screen.w - 38 * s;
+  const availableWidth = bookmarkLeftX - metricsStartX - 10 * s;
+  const computedGroupGap =
+    metrics.length > 1
+      ? Math.max(
+          minGroupGap,
+          Math.min(
+            defaultGroupGap,
+            (availableWidth - contentWidthNoGroupGap) / (metrics.length - 1)
+          )
+        )
+      : defaultGroupGap;
+
+  let cursorX = metricsStartX;
+  const countBaselineY = actionsY + 19 * s;
+
+  const drawMetric = (
+    icon: HTMLImageElement | null,
+    iconRect: { w: number; h: number; y: number },
+    label: string
+  ) => {
+    if (icon) {
+      drawTintedImage(
+        ctx,
+        icon,
+        {
+          x: cursorX,
+          y: actionsY + iconRect.y,
+          w: iconRect.w,
+          h: iconRect.h,
+        },
+        "#111"
+      );
+    }
+    const textX = cursorX + iconRect.w + iconToTextGap;
+    ctx.fillText(label, textX, countBaselineY);
+    cursorX = textX + ctx.measureText(label).width + computedGroupGap;
+  };
+
+  drawMetric(heartIcon, { w: 29 * s, h: 29 * s, y: 0 * s }, counts.likes);
+  drawMetric(commentIcon, { w: 28 * s, h: 28 * s, y: 0 * s }, counts.comments);
+  drawMetric(sendIcon, { w: 29 * s, h: 29 * s, y: -1 * s }, counts.sends);
 
   const captionY = actionsY + actionsH;
   ctx.fillStyle = "#fff";
