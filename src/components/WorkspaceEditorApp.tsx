@@ -154,7 +154,14 @@ type WorkspaceStorageEstimate = {
 };
 
 type CampaignDragPayload = {
+  sourceWorkspaceId: string;
   campaignId: string;
+  sourceClientId: string;
+  sourceProjectId: string;
+};
+
+type ProjectDragPayload = {
+  sourceWorkspaceId: string;
   sourceClientId: string;
   sourceProjectId: string;
 };
@@ -579,6 +586,13 @@ function coerceSelection(data: AppData, selection: Selection): Selection {
     projectId: project.id,
     campaignId: campaign?.id ?? "",
   };
+}
+
+function selectionLevelFromSelection(selection: Selection): SelectionLevel {
+  if (selection.campaignId) return "campaign";
+  if (selection.projectId) return "project";
+  if (selection.clientId) return "client";
+  return "workspace";
 }
 
 function isLocalMediaStoragePath(path: string | undefined): path is string {
@@ -1520,7 +1534,10 @@ export default function WorkspaceEditorApp() {
   const [draggingCampaignId, setDraggingCampaignId] = useState<string | null>(null);
   const [draggingCampaignPayload, setDraggingCampaignPayload] =
     useState<CampaignDragPayload | null>(null);
-  const [campaignDropProjectId, setCampaignDropProjectId] = useState<string | null>(null);
+  const [campaignDropTarget, setCampaignDropTarget] = useState<string | null>(null);
+  const [draggingProjectPayload, setDraggingProjectPayload] =
+    useState<ProjectDragPayload | null>(null);
+  const [projectDropWorkspaceId, setProjectDropWorkspaceId] = useState<string | null>(null);
 
   // Campaign settings drafts
   const [settingsDraft, setSettingsDraft] = useState<
@@ -1606,6 +1623,10 @@ export default function WorkspaceEditorApp() {
 
   function projectExpandKey(projectId: string, workspaceId = activeWorkspaceId): string {
     return `${workspaceId}::project::${projectId}`;
+  }
+
+  function campaignDropTargetKey(projectId: string, workspaceId = activeWorkspaceId): string {
+    return `${workspaceId}::project-drop::${projectId}`;
   }
 
   function storyCtaOffsetKey(campaignId: string, workspaceId = activeWorkspaceId): string {
@@ -1744,8 +1765,10 @@ export default function WorkspaceEditorApp() {
   const loadWorkspaceDataForTree = useCallback(
     async (workspaceId: string, force = false) => {
       const workspace = workspaces.find((candidate) => candidate.id === workspaceId);
-      if (!workspace) return;
-      if (!force && workspaceTreeDataRef.current[workspaceId]) return;
+      if (!workspace) return null;
+      if (!force && workspaceTreeDataRef.current[workspaceId]) {
+        return workspaceTreeDataRef.current[workspaceId];
+      }
 
       setWorkspaceTreeLoading((prev) => ({ ...prev, [workspaceId]: true }));
       setWorkspaceTreeErrors((prev) => {
@@ -1776,12 +1799,14 @@ export default function WorkspaceEditorApp() {
           ...prev,
           [workspaceId]: loadedData,
         }));
+        return loadedData;
       } catch (error) {
         const message =
           error instanceof Error
             ? error.message
             : "Failed to load workspace.";
         setWorkspaceTreeErrors((prev) => ({ ...prev, [workspaceId]: message }));
+        return null;
       } finally {
         setWorkspaceTreeLoading((prev) => ({ ...prev, [workspaceId]: false }));
       }
@@ -2491,6 +2516,43 @@ export default function WorkspaceEditorApp() {
 
   // ── Workspace management ───────────────────────────────────────
 
+  async function getWorkspaceDataForTransfer(
+    workspaceId: string
+  ): Promise<AppData | null> {
+    if (workspaceId === activeWorkspaceId) return data;
+    const cached = workspaceTreeDataRef.current[workspaceId];
+    if (cached) return cached;
+    return await loadWorkspaceDataForTree(workspaceId, true);
+  }
+
+  async function persistWorkspaceStateSnapshot(
+    workspaceId: string,
+    nextData: AppData,
+    nextSelection: Selection,
+    nextLevel: SelectionLevel
+  ): Promise<void> {
+    const workspace = workspaces.find((candidate) => candidate.id === workspaceId);
+    if (!workspace) return;
+
+    if (workspace.kind === "local") {
+      await setLocalWorkspaceState(workspaceId, {
+        data: nextData,
+        selection: nextSelection,
+        level: nextLevel,
+      });
+      return;
+    }
+
+    if (cloudEnabled && supabase && authUser) {
+      await saveWorkspaceData(
+        supabase,
+        workspaceId,
+        nextData as CloudAppData,
+        authUser.id
+      );
+    }
+  }
+
   async function switchWorkspace(
     wsId: string,
     nextLevel?: SelectionLevel,
@@ -3121,6 +3183,34 @@ export default function WorkspaceEditorApp() {
       ) {
         return null;
       }
+      return {
+        sourceWorkspaceId:
+          typeof parsed.sourceWorkspaceId === "string"
+            ? parsed.sourceWorkspaceId
+            : activeWorkspaceId,
+        campaignId: parsed.campaignId,
+        sourceClientId: parsed.sourceClientId,
+        sourceProjectId: parsed.sourceProjectId,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function readProjectDragPayload(e: React.DragEvent): ProjectDragPayload | null {
+    const raw =
+      e.dataTransfer.getData("application/x-socialize-project") ||
+      e.dataTransfer.getData("text/plain");
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as ProjectDragPayload;
+      if (
+        typeof parsed?.sourceWorkspaceId !== "string" ||
+        typeof parsed?.sourceClientId !== "string" ||
+        typeof parsed?.sourceProjectId !== "string"
+      ) {
+        return null;
+      }
       return parsed;
     } catch {
       return null;
@@ -3210,33 +3300,427 @@ export default function WorkspaceEditorApp() {
   function onCampaignDragEnd() {
     setDraggingCampaignId(null);
     setDraggingCampaignPayload(null);
-    setCampaignDropProjectId(null);
+    setCampaignDropTarget(null);
+  }
+
+  function onProjectDragStart(
+    e: React.DragEvent<HTMLDivElement>,
+    payload: ProjectDragPayload
+  ) {
+    e.stopPropagation();
+    const serialized = JSON.stringify(payload);
+    e.dataTransfer.setData("application/x-socialize-project", serialized);
+    e.dataTransfer.setData("text/plain", serialized);
+    e.dataTransfer.effectAllowed = "move";
+    setDraggingProjectPayload(payload);
+  }
+
+  function onProjectDragEnd() {
+    setDraggingProjectPayload(null);
+    setProjectDropWorkspaceId(null);
+  }
+
+  function onWorkspaceProjectDragOver(
+    e: React.DragEvent<HTMLDivElement>,
+    targetWorkspaceId: string
+  ) {
+    const payload = draggingProjectPayload ?? readProjectDragPayload(e);
+    if (!payload || payload.sourceWorkspaceId === targetWorkspaceId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setProjectDropWorkspaceId(targetWorkspaceId);
+  }
+
+  async function moveProjectAcrossWorkspaces(
+    sourceWorkspaceId: string,
+    sourceClientId: string,
+    sourceProjectId: string,
+    targetWorkspaceId: string
+  ): Promise<void> {
+    if (sourceWorkspaceId === targetWorkspaceId) return;
+
+    const sourceData = await getWorkspaceDataForTransfer(sourceWorkspaceId);
+    const targetData = await getWorkspaceDataForTransfer(targetWorkspaceId);
+    if (!sourceData || !targetData) return;
+
+    const sourceClient = sourceData.clients.find(
+      (client) => client.id === sourceClientId
+    );
+    const sourceProject = sourceClient?.projects.find(
+      (project) => project.id === sourceProjectId
+    );
+    if (!sourceClient || !sourceProject) return;
+
+    const projectHasMedia = sourceProject.campaigns.some(
+      (campaign) => Boolean(campaign.mediaStoragePath)
+    );
+
+    const movedProject: Project = {
+      ...sourceProject,
+      id: newId("prj"),
+      campaigns: sourceProject.campaigns.map((campaign) => ({
+        ...campaign,
+        id: newId("cmp"),
+        mediaStoragePath: "",
+        mediaKind: "none",
+        mediaMimeType: "",
+        updatedAt: nowIso(),
+      })),
+    };
+    const removedCampaignIds = sourceProject.campaigns.map((campaign) => campaign.id);
+
+    const sourceNext: AppData = {
+      clients: sourceData.clients.map((client) => {
+        if (client.id !== sourceClientId) return client;
+        return {
+          ...client,
+          projects: client.projects.filter((project) => project.id !== sourceProjectId),
+        };
+      }),
+    };
+
+    const normalizedSourceName = sourceClient.name.trim().toLowerCase();
+    const existingTargetClient = targetData.clients.find(
+      (client) => client.name.trim().toLowerCase() === normalizedSourceName
+    );
+    const targetClientId = existingTargetClient?.id ?? newId("cl");
+
+    const targetNext: AppData = existingTargetClient
+      ? {
+          clients: targetData.clients.map((client) =>
+            client.id !== existingTargetClient.id
+              ? client
+              : { ...client, projects: [...client.projects, movedProject] }
+          ),
+        }
+      : {
+          clients: [
+            ...targetData.clients,
+            {
+              id: targetClientId,
+              name: sourceClient.name,
+              isVerified: sourceClient.isVerified,
+              profileImageDataUrl: sourceClient.profileImageDataUrl,
+              projects: [movedProject],
+            },
+          ],
+        };
+
+    const sourceSelection = defaultSelection(sourceNext);
+    const targetSelection: Selection = {
+      clientId: targetClientId,
+      projectId: movedProject.id,
+      campaignId: movedProject.campaigns[0]?.id ?? "",
+    };
+
+    try {
+      await persistWorkspaceStateSnapshot(
+        sourceWorkspaceId,
+        sourceNext,
+        sourceSelection,
+        sourceSelection.campaignId
+          ? "campaign"
+          : sourceSelection.projectId
+            ? "project"
+            : sourceSelection.clientId
+              ? "client"
+              : "workspace"
+      );
+      await persistWorkspaceStateSnapshot(
+        targetWorkspaceId,
+        targetNext,
+        targetSelection,
+        targetSelection.campaignId ? "campaign" : "project"
+      );
+    } catch (error) {
+      console.error("Failed to persist moved project", error);
+      alert("Unable to move project between workspaces.");
+      return;
+    }
+
+    setWorkspaceTreeData((prev) => ({
+      ...prev,
+      [sourceWorkspaceId]: sourceNext,
+      [targetWorkspaceId]: targetNext,
+    }));
+    cleanupCampaignMedia(removedCampaignIds);
+
+    if (sourceWorkspaceId === activeWorkspaceId) {
+      const sourceLevel: SelectionLevel = sourceSelection.campaignId
+        ? "campaign"
+        : sourceSelection.projectId
+          ? "project"
+          : sourceSelection.clientId
+            ? "client"
+            : "workspace";
+      setData(sourceNext);
+      if (selection.projectId === sourceProjectId) {
+        setSelection(sourceSelection);
+        setSelectionLevel(sourceLevel);
+      }
+    } else if (targetWorkspaceId === activeWorkspaceId) {
+      setData(targetNext);
+      setSelection(targetSelection);
+      setSelectionLevel("project");
+    }
+
+    if (projectHasMedia) {
+      alert(
+        "Project moved. Media files were not transferred yet; please re-upload in the destination workspace."
+      );
+    }
+  }
+
+  async function onWorkspaceProjectDrop(
+    e: React.DragEvent<HTMLDivElement>,
+    targetWorkspaceId: string
+  ) {
+    const payload = draggingProjectPayload ?? readProjectDragPayload(e);
+    setProjectDropWorkspaceId(null);
+    if (!payload) return;
+    e.preventDefault();
+    await moveProjectAcrossWorkspaces(
+      payload.sourceWorkspaceId,
+      payload.sourceClientId,
+      payload.sourceProjectId,
+      targetWorkspaceId
+    );
   }
 
   function onProjectCampaignDragOver(
     e: React.DragEvent<HTMLDivElement>,
+    targetWorkspaceId: string,
     targetProjectId: string
   ) {
     const payload = draggingCampaignPayload ?? readCampaignDragPayload(e);
-    if (!payload || payload.sourceProjectId === targetProjectId) return;
+    if (!payload) return;
+    if (
+      payload.sourceWorkspaceId === targetWorkspaceId &&
+      payload.sourceProjectId === targetProjectId
+    ) {
+      return;
+    }
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
-    setCampaignDropProjectId(targetProjectId);
+    setCampaignDropTarget(campaignDropTargetKey(targetProjectId, targetWorkspaceId));
   }
 
-  function onProjectCampaignDrop(
+  async function moveCampaignAcrossWorkspaces(
+    sourceWorkspaceId: string,
+    sourceClientId: string,
+    sourceProjectId: string,
+    campaignId: string,
+    targetWorkspaceId: string,
+    targetClientId: string,
+    targetProjectId: string
+  ) {
+    const sourceData = await getWorkspaceDataForTransfer(sourceWorkspaceId);
+    if (!sourceData) return;
+
+    if (sourceWorkspaceId === targetWorkspaceId) {
+      if (sourceWorkspaceId === activeWorkspaceId) {
+        moveCampaignBetweenProjects(
+          sourceClientId,
+          sourceProjectId,
+          campaignId,
+          targetClientId,
+          targetProjectId
+        );
+        return;
+      }
+
+      let movingCampaign: Campaign | null = null;
+      const removedData: AppData = {
+        clients: sourceData.clients.map((client) => {
+          if (client.id !== sourceClientId) return client;
+          return {
+            ...client,
+            projects: client.projects.map((project) => {
+              if (project.id !== sourceProjectId) return project;
+              const found = project.campaigns.find((campaign) => campaign.id === campaignId);
+              if (found) movingCampaign = found;
+              return {
+                ...project,
+                campaigns: project.campaigns.filter((campaign) => campaign.id !== campaignId),
+              };
+            }),
+          };
+        }),
+      };
+
+      if (!movingCampaign) return;
+
+      const nextData: AppData = {
+        clients: removedData.clients.map((client) => {
+          if (client.id !== targetClientId) return client;
+          return {
+            ...client,
+            projects: client.projects.map((project) =>
+              project.id !== targetProjectId
+                ? project
+                : { ...project, campaigns: [...project.campaigns, movingCampaign as Campaign] }
+            ),
+          };
+        }),
+      };
+
+      const nextSelection = defaultSelection(nextData);
+      try {
+        await persistWorkspaceStateSnapshot(
+          sourceWorkspaceId,
+          nextData,
+          nextSelection,
+          selectionLevelFromSelection(nextSelection)
+        );
+      } catch (error) {
+        console.error("Failed to persist moved campaign", error);
+        alert("Unable to move ad between projects.");
+        return;
+      }
+
+      setWorkspaceTreeData((prev) => ({ ...prev, [sourceWorkspaceId]: nextData }));
+      setExpandedClients((prev) => ({
+        ...prev,
+        [clientExpandKey(targetClientId, sourceWorkspaceId)]: true,
+      }));
+      setExpandedProjects((prev) => ({
+        ...prev,
+        [projectExpandKey(targetProjectId, sourceWorkspaceId)]: true,
+      }));
+      return;
+    }
+
+    const targetData = await getWorkspaceDataForTransfer(targetWorkspaceId);
+    if (!targetData) return;
+
+    const sourceClient = sourceData.clients.find((client) => client.id === sourceClientId);
+    const sourceProject = sourceClient?.projects.find((project) => project.id === sourceProjectId);
+    const sourceCampaign = sourceProject?.campaigns.find(
+      (campaign) => campaign.id === campaignId
+    );
+    if (!sourceClient || !sourceProject || !sourceCampaign) return;
+
+    const targetClient = targetData.clients.find((client) => client.id === targetClientId);
+    const targetProject = targetClient?.projects.find((project) => project.id === targetProjectId);
+    if (!targetClient || !targetProject) return;
+
+    const campaignHasMedia = Boolean(sourceCampaign.mediaStoragePath);
+    const movedCampaign: Campaign = {
+      ...sourceCampaign,
+      id: newId("cmp"),
+      mediaStoragePath: "",
+      mediaKind: "none",
+      mediaMimeType: "",
+      updatedAt: nowIso(),
+    };
+
+    const sourceNext: AppData = {
+      clients: sourceData.clients.map((client) => {
+        if (client.id !== sourceClientId) return client;
+        return {
+          ...client,
+          projects: client.projects.map((project) =>
+            project.id !== sourceProjectId
+              ? project
+              : {
+                  ...project,
+                  campaigns: project.campaigns.filter((campaign) => campaign.id !== campaignId),
+                }
+          ),
+        };
+      }),
+    };
+
+    const targetNext: AppData = {
+      clients: targetData.clients.map((client) => {
+        if (client.id !== targetClientId) return client;
+        return {
+          ...client,
+          projects: client.projects.map((project) =>
+            project.id !== targetProjectId
+              ? project
+              : { ...project, campaigns: [...project.campaigns, movedCampaign] }
+          ),
+        };
+      }),
+    };
+
+    const sourceSelection = defaultSelection(sourceNext);
+    const targetSelection: Selection = {
+      clientId: targetClientId,
+      projectId: targetProjectId,
+      campaignId: movedCampaign.id,
+    };
+
+    try {
+      await persistWorkspaceStateSnapshot(
+        sourceWorkspaceId,
+        sourceNext,
+        sourceSelection,
+        selectionLevelFromSelection(sourceSelection)
+      );
+      await persistWorkspaceStateSnapshot(
+        targetWorkspaceId,
+        targetNext,
+        targetSelection,
+        "campaign"
+      );
+    } catch (error) {
+      console.error("Failed to persist moved campaign", error);
+      alert("Unable to move ad between workspaces.");
+      return;
+    }
+
+    setWorkspaceTreeData((prev) => ({
+      ...prev,
+      [sourceWorkspaceId]: sourceNext,
+      [targetWorkspaceId]: targetNext,
+    }));
+    setExpandedClients((prev) => ({
+      ...prev,
+      [clientExpandKey(targetClientId, targetWorkspaceId)]: true,
+    }));
+    setExpandedProjects((prev) => ({
+      ...prev,
+      [projectExpandKey(targetProjectId, targetWorkspaceId)]: true,
+    }));
+    cleanupCampaignMedia([campaignId]);
+
+    if (sourceWorkspaceId === activeWorkspaceId) {
+      setData(sourceNext);
+      if (selection.campaignId === campaignId) {
+        setSelection(sourceSelection);
+        setSelectionLevel(selectionLevelFromSelection(sourceSelection));
+      }
+    } else if (targetWorkspaceId === activeWorkspaceId) {
+      setData(targetNext);
+      setSelection(targetSelection);
+      setSelectionLevel("campaign");
+    }
+
+    if (campaignHasMedia) {
+      alert(
+        "Ad moved. Media files were not transferred yet; please re-upload in the destination workspace."
+      );
+    }
+  }
+
+  async function onProjectCampaignDrop(
     e: React.DragEvent<HTMLDivElement>,
+    targetWorkspaceId: string,
     targetClientId: string,
     targetProjectId: string
   ) {
     const payload = draggingCampaignPayload ?? readCampaignDragPayload(e);
-    setCampaignDropProjectId(null);
+    setCampaignDropTarget(null);
     if (!payload) return;
     e.preventDefault();
-    moveCampaignBetweenProjects(
+    await moveCampaignAcrossWorkspaces(
+      payload.sourceWorkspaceId,
       payload.sourceClientId,
       payload.sourceProjectId,
       payload.campaignId,
+      targetWorkspaceId,
       targetClientId,
       targetProjectId
     );
@@ -3598,7 +4082,7 @@ export default function WorkspaceEditorApp() {
       return (
         <div key={workspace.id} className="tree-section tree-workspace-section">
           <div
-            className={`tree-row tree-row-workspace tree-row-with-toggle${isWorkspaceSelected ? " is-selected" : ""}`}
+            className={`tree-row tree-row-workspace tree-row-with-toggle${isWorkspaceSelected ? " is-selected" : ""}${projectDropWorkspaceId === workspace.id ? " is-drop-target" : ""}`}
             onClick={(e) => {
               if (isRenamingLocalWorkspace && isLocalWorkspaceNode) return;
               void switchWorkspace(workspace.id, "workspace");
@@ -3610,6 +4094,16 @@ export default function WorkspaceEditorApp() {
               e.preventDefault();
               e.stopPropagation();
               beginLocalWorkspaceRename();
+            }}
+            onDragOver={(e) => onWorkspaceProjectDragOver(e, workspace.id)}
+            onDragEnter={(e) => onWorkspaceProjectDragOver(e, workspace.id)}
+            onDragLeave={() => {
+              if (projectDropWorkspaceId === workspace.id) {
+                setProjectDropWorkspaceId(null);
+              }
+            }}
+            onDrop={(e) => {
+              void onWorkspaceProjectDrop(e, workspace.id);
             }}
           >
             <IconWorkspace />
@@ -3750,7 +4244,7 @@ export default function WorkspaceEditorApp() {
                             return (
                               <div key={project.id}>
                                 <div
-                                  className={`tree-row tree-row-project tree-row-with-toggle${isProjSelected && selectionLevel === "project" ? " is-selected" : ""}${isWorkspaceActive && campaignDropProjectId === project.id ? " is-drop-target" : ""}`}
+                                  className={`tree-row tree-row-project tree-row-with-toggle${isProjSelected && selectionLevel === "project" ? " is-selected" : ""}${campaignDropTarget === campaignDropTargetKey(project.id, workspace.id) ? " is-drop-target" : ""}`}
                                   onClick={(e) => {
                                     const campaign = project.campaigns[0];
                                     activateWorkspaceSelection(
@@ -3770,23 +4264,36 @@ export default function WorkspaceEditorApp() {
                                     beginProjectEdit(client.id, project.id, project.name);
                                   }}
                                   onDragOver={(e) => {
-                                    if (!isWorkspaceActive) return;
-                                    onProjectCampaignDragOver(e, project.id);
+                                    onProjectCampaignDragOver(e, workspace.id, project.id);
                                   }}
                                   onDragEnter={(e) => {
-                                    if (!isWorkspaceActive) return;
-                                    onProjectCampaignDragOver(e, project.id);
+                                    onProjectCampaignDragOver(e, workspace.id, project.id);
                                   }}
                                   onDragLeave={() => {
-                                    if (!isWorkspaceActive) return;
-                                    if (campaignDropProjectId === project.id) {
-                                      setCampaignDropProjectId(null);
+                                    if (
+                                      campaignDropTarget ===
+                                      campaignDropTargetKey(project.id, workspace.id)
+                                    ) {
+                                      setCampaignDropTarget(null);
                                     }
                                   }}
                                   onDrop={(e) => {
-                                    if (!isWorkspaceActive) return;
-                                    onProjectCampaignDrop(e, client.id, project.id);
+                                    void onProjectCampaignDrop(
+                                      e,
+                                      workspace.id,
+                                      client.id,
+                                      project.id
+                                    );
                                   }}
+                                  draggable={!isEditingProj}
+                                  onDragStart={(e) =>
+                                    onProjectDragStart(e, {
+                                      sourceWorkspaceId: workspace.id,
+                                      sourceClientId: client.id,
+                                      sourceProjectId: project.id,
+                                    })
+                                  }
+                                  onDragEnd={onProjectDragEnd}
                                 >
                                   {isEditingProj ? (
                                     <input
@@ -3854,19 +4361,16 @@ export default function WorkspaceEditorApp() {
                                               campaign.name
                                             );
                                           }}
-                                          draggable={isWorkspaceActive && !isEditingCamp}
+                                          draggable={!isEditingCamp}
                                           onDragStart={(e) => {
-                                            if (!isWorkspaceActive) return;
                                             onCampaignDragStart(e, {
+                                              sourceWorkspaceId: workspace.id,
                                               campaignId: campaign.id,
                                               sourceClientId: client.id,
                                               sourceProjectId: project.id,
                                             });
                                           }}
-                                          onDragEnd={() => {
-                                            if (!isWorkspaceActive) return;
-                                            onCampaignDragEnd();
-                                          }}
+                                          onDragEnd={onCampaignDragEnd}
                                         >
                                           {isEditingCamp ? (
                                             <input
@@ -3972,10 +4476,7 @@ export default function WorkspaceEditorApp() {
 
         <div className="pane-body">
           <div className="tree">
-            <div className="tree-workspace-group-label">Local</div>
-            {renderWorkspaceNode(localWorkspaceGroup)}
-
-            <div className="tree-workspace-group-label tree-workspace-group-label-shared">
+            <div className="tree-workspace-group-label">
               Shared
             </div>
             {sharedWorkspaces.length === 0 ? (
@@ -3996,6 +4497,11 @@ export default function WorkspaceEditorApp() {
                 <IconPlus /> New Cloud Workspace
               </button>
             )}
+
+            <div className="tree-workspace-group-label" style={{ marginTop: 10 }}>
+              Local
+            </div>
+            {renderWorkspaceNode(localWorkspaceGroup)}
           </div>
         </div>
 
