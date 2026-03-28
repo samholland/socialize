@@ -1601,10 +1601,16 @@ export default function WorkspaceEditorApp() {
           typeof window !== "undefined"
             ? localStorage.getItem(CLOUD_ACTIVE_WS_KEY)
             : null;
-        const wsId =
-          (storedActive && resolvedList.find((w) => w.id === storedActive)?.id) ||
-          localWorkspaceEntry.id ||
-          personal.id;
+        const storedWorkspaceId =
+          (storedActive &&
+            resolvedList.find(
+              (workspace) => workspace.id === storedActive && workspace.kind !== "personal"
+            )?.id) ||
+          "";
+        const defaultCloudWorkspaceId = resolvedList.find(
+          (workspace) => workspace.kind === "organization"
+        )?.id;
+        const wsId = storedWorkspaceId || defaultCloudWorkspaceId || localWorkspaceEntry.id;
 
         if (cancelled) return;
         setWorkspaces(resolvedList);
@@ -1690,6 +1696,7 @@ export default function WorkspaceEditorApp() {
   const [workspaceInviteUpgradeLoading, setWorkspaceInviteUpgradeLoading] =
     useState(false);
   const [workspaceInvitesError, setWorkspaceInvitesError] = useState<string | null>(null);
+  const [canCreateSharedWorkspace, setCanCreateSharedWorkspace] = useState(false);
   const [incomingWorkspaceInvites, setIncomingWorkspaceInvites] = useState<
     CloudIncomingWorkspaceInvite[]
   >([]);
@@ -1943,6 +1950,7 @@ export default function WorkspaceEditorApp() {
       setIncomingWorkspaceInvitesError(null);
       setWorkspaceInvitesByWorkspace({});
       setWorkspaceMembersByWorkspace({});
+      setCanCreateSharedWorkspace(false);
       setWorkspaceMembersLoading(false);
       setWorkspaceMembersError(null);
       setWorkspaceInvitesError(null);
@@ -1950,6 +1958,7 @@ export default function WorkspaceEditorApp() {
     }
     void refreshIncomingWorkspaceInviteList();
     void refreshUserProfileSettings();
+    void refreshSharedWorkspaceCreateAccess();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cloudEnabled, supabase, authUser?.id]);
 
@@ -1965,6 +1974,12 @@ export default function WorkspaceEditorApp() {
     void refreshWorkspaceInviteList(activeWorkspaceId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cloudEnabled, supabase, authUser?.id, activeWorkspaceId, activeWorkspace.kind]);
+
+  useEffect(() => {
+    if (!cloudEnabled || !supabase || !authUser) return;
+    void refreshSharedWorkspaceCreateAccess();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cloudEnabled, supabase, authUser?.id, workspaces, workspaceMembersByWorkspace]);
 
   function updateLocalWorkspaceName(nextNameRaw: string): string {
     const normalized = normalizeWorkspaceName(nextNameRaw);
@@ -2181,6 +2196,26 @@ export default function WorkspaceEditorApp() {
       setIncomingWorkspaceInvitesError(message);
     } finally {
       setIncomingWorkspaceInvitesLoading(false);
+    }
+  }
+
+  async function refreshSharedWorkspaceCreateAccess() {
+    if (!cloudEnabled || !supabase || !authUser) {
+      setCanCreateSharedWorkspace(false);
+      return;
+    }
+    try {
+      const { count, error } = await supabase
+        .from("organization_memberships")
+        .select("organization_id", { count: "exact", head: true })
+        .eq("user_id", authUser.id)
+        .eq("role", "owner")
+        .limit(1);
+      if (error) throw error;
+      setCanCreateSharedWorkspace((count ?? 0) > 0);
+    } catch (error) {
+      console.warn("Failed to evaluate shared workspace create access", error);
+      setCanCreateSharedWorkspace(false);
     }
   }
 
@@ -4152,8 +4187,12 @@ export default function WorkspaceEditorApp() {
   }
 
   function createWorkspace() {
+    if (!canCreateSharedWorkspace) {
+      alert("Only owner accounts can create shared workspaces.");
+      return;
+    }
     if (cloudEnabled && supabase && authUser) {
-      const existingShared = workspaces.filter((w) => w.kind !== "local").length;
+      const existingShared = workspaces.filter((workspace) => workspace.kind === "organization").length;
       const name = `Shared Workspace ${existingShared + 1}`;
       const wsId = newId("ws");
       void (async () => {
@@ -6057,7 +6096,7 @@ export default function WorkspaceEditorApp() {
   function renderSidebar() {
     const localWorkspaceGroup =
       workspaces.find((workspace) => workspace.kind === "local") ?? localWorkspace;
-    const sharedWorkspaces = workspaces.filter((w) => w.kind !== "local");
+    const sharedWorkspaces = workspaces.filter((workspace) => workspace.kind === "organization");
 
     const activateWorkspaceSelection = (
       workspaceId: string,
@@ -6602,7 +6641,7 @@ export default function WorkspaceEditorApp() {
             ) : (
               sharedWorkspaces.map((workspace) => renderWorkspaceNode(workspace))
             )}
-            {cloudEnabled && authUser && (
+            {cloudEnabled && authUser && canCreateSharedWorkspace && (
               <button
                 className="tree-add-row"
                 style={{ marginTop: 6 }}
@@ -6610,6 +6649,11 @@ export default function WorkspaceEditorApp() {
               >
                 <IconPlus /> New Shared Workspace
               </button>
+            )}
+            {cloudEnabled && authUser && !canCreateSharedWorkspace && (
+              <div className="tree-workspace-meta" style={{ marginTop: 6 }}>
+                Owner account required to create a shared workspace.
+              </div>
             )}
 
             <div className="tree-workspace-group-label" style={{ marginTop: 10 }}>
