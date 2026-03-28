@@ -190,6 +190,14 @@ type ProjectDragPayload = {
   sourceProjectId: string;
 };
 
+type CampaignDeepLinkTarget = {
+  key: string;
+  workspaceId: string;
+  clientId: string;
+  projectId: string;
+  campaignId: string;
+};
+
 // ─── Constants ───────────────────────────────────────────────────
 
 const LEGACY_STORAGE_KEY = "socialize.v1.workspace"; // for migration only
@@ -204,6 +212,10 @@ const LOCAL_WS_NAME_KEY = "socialize.localWorkspaceName";
 const DEFAULT_LOCAL_WORKSPACE_NAME = "Local Workspace";
 const DEFAULT_MOCKUP_BACKDROP = "#ffffff";
 const LOCAL_MEDIA_PATH_PREFIX = "local:";
+const WS_PARAM_KEY = "ws";
+const CLIENT_PARAM_KEY = "cl";
+const PROJECT_PARAM_KEY = "pr";
+const CAMPAIGN_PARAM_KEY = "ad";
 
 const PLATFORM_OPTIONS: Platform[] = [
   "Instagram Feed",
@@ -635,6 +647,19 @@ function selectionLevelFromSelection(selection: Selection): SelectionLevel {
   if (selection.projectId) return "project";
   if (selection.clientId) return "client";
   return "workspace";
+}
+
+function cleanParam(value: string | null): string {
+  return (value ?? "").trim();
+}
+
+function deepLinkKeyFromTarget(target: {
+  workspaceId: string;
+  clientId: string;
+  projectId: string;
+  campaignId: string;
+}): string {
+  return [target.workspaceId, target.clientId, target.projectId, target.campaignId].join("|");
 }
 
 function isLocalMediaStoragePath(path: string | undefined): path is string {
@@ -1745,6 +1770,7 @@ export default function WorkspaceEditorApp() {
 
   // Copy flash
   const [copyFlash, setCopyFlash] = useState(false);
+  const [copyLinkFlash, setCopyLinkFlash] = useState(false);
 
   const canvasRef = useRef<PreviewCanvasHandle>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
@@ -1753,9 +1779,13 @@ export default function WorkspaceEditorApp() {
   const previewBodyRef = useRef<HTMLDivElement>(null);
   const previewExportRef = useRef<HTMLDivElement>(null);
   const saveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingDeepLinkRef = useRef<CampaignDeepLinkTarget | null>(null);
+  const handledDeepLinkKeyRef = useRef("");
+  const applyingDeepLinkRef = useRef(false);
   const hydratedWorkspaceRef = useRef<string>("");
   const workspaceTreeDataRef = useRef<Record<string, AppData>>({});
   const cloudWorkspaceDataSignatureRef = useRef<Record<string, string>>({});
+  const [pendingDeepLinkKey, setPendingDeepLinkKey] = useState<string | null>(null);
   const localWorkspace =
     workspaces.find((w) => w.kind === "local") ?? createLocalWorkspace();
   const activeWorkspace =
@@ -1775,6 +1805,63 @@ export default function WorkspaceEditorApp() {
   const effectiveProfileDisplayName =
     profileDisplayNameSaved.trim() ||
     defaultProfileDisplayName(authUser?.email ?? null);
+
+  function campaignLinkForSelection(
+    workspaceId: string,
+    nextSelection: Selection
+  ): string | null {
+    if (typeof window === "undefined") return null;
+    if (!nextSelection.clientId || !nextSelection.projectId || !nextSelection.campaignId) {
+      return null;
+    }
+    const url = new URL(window.location.href);
+    url.searchParams.set(WS_PARAM_KEY, workspaceId);
+    url.searchParams.set(CLIENT_PARAM_KEY, nextSelection.clientId);
+    url.searchParams.set(PROJECT_PARAM_KEY, nextSelection.projectId);
+    url.searchParams.set(CAMPAIGN_PARAM_KEY, nextSelection.campaignId);
+    return url.toString();
+  }
+
+  function copyTextWithFeedback(
+    value: string,
+    onSuccess: () => void
+  ): void {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(value).then(onSuccess).catch(() => {
+        const area = document.createElement("textarea");
+        area.value = value;
+        area.setAttribute("readonly", "true");
+        area.style.position = "fixed";
+        area.style.opacity = "0";
+        document.body.appendChild(area);
+        area.select();
+        try {
+          document.execCommand("copy");
+          onSuccess();
+        } catch {
+          // noop
+        } finally {
+          document.body.removeChild(area);
+        }
+      });
+      return;
+    }
+    const area = document.createElement("textarea");
+    area.value = value;
+    area.setAttribute("readonly", "true");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    try {
+      document.execCommand("copy");
+      onSuccess();
+    } catch {
+      // noop
+    } finally {
+      document.body.removeChild(area);
+    }
+  }
 
   function setWorkspaceRevision(workspaceId: string, revision: number) {
     const normalized = Math.max(0, Math.floor(revision));
@@ -2933,6 +3020,145 @@ export default function WorkspaceEditorApp() {
     refreshWorkspaceStorageEstimate,
   ]);
 
+  useEffect(() => {
+    const campaignId = cleanParam(searchParams.get(CAMPAIGN_PARAM_KEY));
+    if (!campaignId) {
+      pendingDeepLinkRef.current = null;
+      setPendingDeepLinkKey(null);
+      return;
+    }
+    const target = {
+      workspaceId: cleanParam(searchParams.get(WS_PARAM_KEY)),
+      clientId: cleanParam(searchParams.get(CLIENT_PARAM_KEY)),
+      projectId: cleanParam(searchParams.get(PROJECT_PARAM_KEY)),
+      campaignId,
+    };
+    const key = deepLinkKeyFromTarget(target);
+    pendingDeepLinkRef.current = { ...target, key };
+    if (handledDeepLinkKeyRef.current !== key) {
+      setPendingDeepLinkKey(key);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!pendingDeepLinkKey) return;
+    const deepLinkReady =
+      storageReady && (!cloudEnabled || (authReady && Boolean(authUser) && cloudHydrated));
+    if (!deepLinkReady) return;
+    if (applyingDeepLinkRef.current) return;
+    const target = pendingDeepLinkRef.current;
+    if (!target || target.key !== pendingDeepLinkKey) return;
+
+    applyingDeepLinkRef.current = true;
+    void (async () => {
+      try {
+        const targetWorkspaceId = target.workspaceId || activeWorkspaceId;
+        const targetWorkspace = workspaces.find(
+          (workspace) => workspace.id === targetWorkspaceId
+        );
+        if (!targetWorkspace) {
+          alert("This ad link points to a workspace you cannot access.");
+          return;
+        }
+        const targetData = await getWorkspaceDataForTransfer(targetWorkspaceId);
+        if (!targetData) {
+          alert("Unable to load the linked workspace.");
+          return;
+        }
+
+        let resolvedSelection: Selection | null = null;
+        if (target.clientId && target.projectId) {
+          const client = targetData.clients.find((candidate) => candidate.id === target.clientId);
+          const project = client?.projects.find((candidate) => candidate.id === target.projectId);
+          const campaign = project?.campaigns.find(
+            (candidate) => candidate.id === target.campaignId
+          );
+          if (client && project && campaign) {
+            resolvedSelection = {
+              clientId: client.id,
+              projectId: project.id,
+              campaignId: campaign.id,
+            };
+          }
+        }
+        if (!resolvedSelection) {
+          for (const client of targetData.clients) {
+            for (const project of client.projects) {
+              const campaign = project.campaigns.find(
+                (candidate) => candidate.id === target.campaignId
+              );
+              if (!campaign) continue;
+              resolvedSelection = {
+                clientId: client.id,
+                projectId: project.id,
+                campaignId: campaign.id,
+              };
+              break;
+            }
+            if (resolvedSelection) break;
+          }
+        }
+        if (!resolvedSelection) {
+          alert("This ad link is no longer valid.");
+          return;
+        }
+        await switchWorkspace(targetWorkspaceId, "campaign", resolvedSelection);
+      } finally {
+        handledDeepLinkKeyRef.current = pendingDeepLinkKey;
+        applyingDeepLinkRef.current = false;
+        setPendingDeepLinkKey(null);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    pendingDeepLinkKey,
+    storageReady,
+    cloudEnabled,
+    authReady,
+    authUser?.id,
+    cloudHydrated,
+    activeWorkspaceId,
+    workspaces,
+  ]);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    if (pendingDeepLinkKey) return;
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    const shouldLinkCampaign =
+      selectionLevel === "campaign" &&
+      Boolean(selection.clientId) &&
+      Boolean(selection.projectId) &&
+      Boolean(selection.campaignId);
+    if (shouldLinkCampaign) {
+      url.searchParams.set(WS_PARAM_KEY, activeWorkspaceId);
+      url.searchParams.set(CLIENT_PARAM_KEY, selection.clientId);
+      url.searchParams.set(PROJECT_PARAM_KEY, selection.projectId);
+      url.searchParams.set(CAMPAIGN_PARAM_KEY, selection.campaignId);
+    } else {
+      url.searchParams.delete(WS_PARAM_KEY);
+      url.searchParams.delete(CLIENT_PARAM_KEY);
+      url.searchParams.delete(PROJECT_PARAM_KEY);
+      url.searchParams.delete(CAMPAIGN_PARAM_KEY);
+    }
+    const nextSearch = url.searchParams.toString();
+    const currentSearch = window.location.search.startsWith("?")
+      ? window.location.search.slice(1)
+      : window.location.search;
+    if (nextSearch === currentSearch) return;
+    const nextUrl = `${url.pathname}${nextSearch ? `?${nextSearch}` : ""}${url.hash}`;
+    window.history.replaceState(window.history.state, "", nextUrl);
+  }, [
+    storageReady,
+    pendingDeepLinkKey,
+    selectionLevel,
+    activeWorkspaceId,
+    selection.clientId,
+    selection.projectId,
+    selection.campaignId,
+  ]);
+
   // Cleanup blob URLs on unmount
   useEffect(() => {
     return () => {
@@ -3023,6 +3249,12 @@ export default function WorkspaceEditorApp() {
     Boolean(selectedCampaign) &&
     activeCampaignHasPresenceLock &&
     !activeCampaignPresenceOverride;
+  const canCopyCampaignLink =
+    !activeWorkspaceIsLocal &&
+    selectionLevel === "campaign" &&
+    Boolean(selection.clientId) &&
+    Boolean(selection.projectId) &&
+    Boolean(selection.campaignId);
 
   useEffect(() => {
     setActiveCampaignPresenceOverride(false);
@@ -4503,6 +4735,15 @@ export default function WorkspaceEditorApp() {
     setShowUserSettings(false);
     setSelection({ clientId, projectId, campaignId });
     setSelectionLevel("campaign");
+  }
+
+  function copyCurrentCampaignLink() {
+    const link = campaignLinkForSelection(activeWorkspaceId, selection);
+    if (!link) return;
+    copyTextWithFeedback(link, () => {
+      setCopyLinkFlash(true);
+      setTimeout(() => setCopyLinkFlash(false), 1200);
+    });
   }
 
   function toggleWorkspace(workspaceId: string) {
@@ -7569,21 +7810,30 @@ export default function WorkspaceEditorApp() {
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                   <label className="form-label" style={{ margin: 0 }}>Body Copy</label>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {copyLinkFlash && <span className="copy-success">Link copied!</span>}
                     {copyFlash && <span className="copy-success">Copied!</span>}
                     <button
                       className="btn btn-ghost btn-sm"
                       onClick={() => {
-                        const flash = () => { setCopyFlash(true); setTimeout(() => setCopyFlash(false), 1200); };
-                        if (navigator.clipboard) {
-                          navigator.clipboard.writeText(campaign.primaryText).then(flash).catch(() => {
-                            try { document.execCommand("copy"); flash(); } catch { /* ignore */ }
-                          });
-                        } else {
-                          try { document.execCommand("copy"); flash(); } catch { /* ignore */ }
-                        }
+                        copyTextWithFeedback(campaign.primaryText, () => {
+                          setCopyFlash(true);
+                          setTimeout(() => setCopyFlash(false), 1200);
+                        });
                       }}
                     >
                       Copy
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={copyCurrentCampaignLink}
+                      disabled={!canCopyCampaignLink}
+                      title={
+                        canCopyCampaignLink
+                          ? "Copy shareable ad link"
+                          : "Ad links are available for shared/cloud workspaces."
+                      }
+                    >
+                      Copy Link
                     </button>
                   </div>
                 </div>
