@@ -1247,13 +1247,40 @@ function IconChevron({ open }: { open: boolean }) {
   );
 }
 
-function IconWorkspace() {
+function IconWorkspace({ kind }: { kind: WorkspaceKind }) {
+  const iconSrc = kind === "local" ? "/images/socialize/ui_write.svg" : "/images/socialize/ui_org.svg";
+  // eslint-disable-next-line @next/next/no-img-element
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-      <line x1="8" y1="21" x2="16" y2="21" />
-      <line x1="12" y1="17" x2="12" y2="21" />
-    </svg>
+    <img
+      src={iconSrc}
+      alt=""
+      aria-hidden="true"
+      className="tree-node-icon tree-node-icon-workspace"
+    />
+  );
+}
+
+function IconTreeProject() {
+  // eslint-disable-next-line @next/next/no-img-element
+  return (
+    <img
+      src="/images/socialize/ui_folder.svg"
+      alt=""
+      aria-hidden="true"
+      className="tree-node-icon tree-node-icon-project"
+    />
+  );
+}
+
+function IconTreeAd() {
+  // eslint-disable-next-line @next/next/no-img-element
+  return (
+    <img
+      src="/images/socialize/ui_doc.svg"
+      alt=""
+      aria-hidden="true"
+      className="tree-node-icon tree-node-icon-campaign"
+    />
   );
 }
 
@@ -1733,6 +1760,15 @@ export default function WorkspaceEditorApp() {
     workspaces.find((w) => w.kind === "local") ?? createLocalWorkspace();
   const activeWorkspace =
     workspaces.find((w) => w.id === activeWorkspaceId) ?? localWorkspace;
+  const activeWorkspaceMembers = workspaceMembersByWorkspace[activeWorkspaceId] ?? [];
+  const activeWorkspaceMembership =
+    activeWorkspaceMembers.find((member) => member.isCurrentUser) ??
+    (authUser
+      ? activeWorkspaceMembers.find((member) => member.userId === authUser.id)
+      : undefined);
+  const canDeleteActiveWorkspace =
+    activeWorkspace.kind === "organization" &&
+    activeWorkspaceMembership?.role === "owner";
   const activeWorkspaceIsLocal = activeWorkspace.kind === "local";
   const activeWorkspaceRevision =
     typeof activeWorkspace.revision === "number" ? activeWorkspace.revision : 0;
@@ -3927,6 +3963,10 @@ export default function WorkspaceEditorApp() {
       );
       return;
     }
+    if (activeWorkspace.kind === "organization" && !canDeleteActiveWorkspace) {
+      alert("Only workspace owners can delete a shared workspace.");
+      return;
+    }
     if (!cloudEnabled || !supabase || !authUser) return;
 
     const targetWorkspaceId = activeWorkspace.id;
@@ -5829,7 +5869,19 @@ export default function WorkspaceEditorApp() {
               void onWorkspaceProjectDrop(e, workspace.id);
             }}
           >
-            <IconWorkspace />
+            <button
+              className="tree-toggle tree-toggle-start"
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleWorkspace(workspace.id);
+              }}
+              tabIndex={-1}
+            >
+              <IconChevron open={isWorkspaceExpanded} />
+            </button>
+            <span className="tree-node-leading">
+              <IconWorkspace kind={workspace.kind} />
+            </span>
             {isWorkspaceBeingRenamed ? (
               <input
                 autoFocus
@@ -5856,20 +5908,10 @@ export default function WorkspaceEditorApp() {
               </span>
             )}
             {isWorkspaceActive && (
-              <span className="ws-check" style={{ marginRight: 22 }}>
+              <span className="ws-check">
                 ✓
               </span>
             )}
-            <button
-              className="tree-toggle tree-toggle-end"
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleWorkspace(workspace.id);
-              }}
-              tabIndex={-1}
-            >
-              <IconChevron open={isWorkspaceExpanded} />
-            </button>
           </div>
 
           <div className={`tree-workspace-children${isWorkspaceExpanded ? " is-open" : ""}`}>
@@ -5924,6 +5966,26 @@ export default function WorkspaceEditorApp() {
                           beginClientEdit(client.id, client.name);
                         }}
                       >
+                        <button
+                          className="tree-toggle tree-toggle-start"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleClient(client.id, workspace.id);
+                          }}
+                          tabIndex={-1}
+                        >
+                          <IconChevron open={isClientExpanded} />
+                        </button>
+                        <span className="tree-node-leading">
+                          <span className="tree-client-avatar" aria-hidden="true">
+                            {client.profileImageDataUrl ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={client.profileImageDataUrl} alt="" />
+                            ) : (
+                              (client.name.trim().slice(0, 1) || "C").toUpperCase()
+                            )}
+                          </span>
+                        </span>
                         {isEditingClient ? (
                           <input
                             autoFocus
@@ -5942,16 +6004,6 @@ export default function WorkspaceEditorApp() {
                           </span>
                         )}
 
-                        <button
-                          className="tree-toggle tree-toggle-end"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleClient(client.id, workspace.id);
-                          }}
-                          tabIndex={-1}
-                        >
-                          <IconChevron open={isClientExpanded} />
-                        </button>
                       </div>
 
                       <div className={`tree-client-children${isClientExpanded ? " is-open" : ""}`}>
@@ -6024,6 +6076,19 @@ export default function WorkspaceEditorApp() {
                                   }
                                   onDragEnd={onProjectDragEnd}
                                 >
+                                  <button
+                                    className="tree-toggle tree-toggle-start"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      toggleProject(project.id, workspace.id);
+                                    }}
+                                    tabIndex={-1}
+                                  >
+                                    <IconChevron open={isProjExpanded} />
+                                  </button>
+                                  <span className="tree-node-leading">
+                                    <IconTreeProject />
+                                  </span>
                                   {isEditingProj ? (
                                     <input
                                       autoFocus
@@ -6042,16 +6107,6 @@ export default function WorkspaceEditorApp() {
                                     </span>
                                   )}
 
-                                  <button
-                                    className="tree-toggle tree-toggle-end"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      toggleProject(project.id, workspace.id);
-                                    }}
-                                    tabIndex={-1}
-                                  >
-                                    <IconChevron open={isProjExpanded} />
-                                  </button>
                                 </div>
 
                                 <div
@@ -6164,6 +6219,9 @@ export default function WorkspaceEditorApp() {
                                             />
                                           ) : (
                                             <span className="tree-campaign-main">
+                                              <span className="tree-node-leading">
+                                                <IconTreeAd />
+                                              </span>
                                               <span className="tree-label tree-label-campaign">
                                                 {campaign.name}
                                               </span>
@@ -6389,7 +6447,7 @@ export default function WorkspaceEditorApp() {
             />
           </div>
 
-          {!isLocalWorkspace && activeWorkspace.kind === "organization" && (
+          {!isLocalWorkspace && activeWorkspace.kind === "organization" && canDeleteActiveWorkspace && (
             <div className="form-group" style={{ marginTop: -6 }}>
               <button
                 className="btn btn-danger btn-sm"
