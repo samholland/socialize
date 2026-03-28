@@ -4249,6 +4249,21 @@ export default function WorkspaceEditorApp() {
 
     void (async () => {
       try {
+        if (activeWorkspace.kind === "organization") {
+          const members = await listWorkspaceMembers(supabase, targetWorkspaceId);
+          setWorkspaceMembersByWorkspace((prev) => ({
+            ...prev,
+            [targetWorkspaceId]: members,
+          }));
+          const currentMembership =
+            members.find((member) => member.isCurrentUser) ??
+            members.find((member) => member.userId === authUser.id);
+          if (currentMembership?.role !== "owner") {
+            alert("Only workspace owners can delete a shared workspace.");
+            return;
+          }
+        }
+
         const { error } = await supabase
           .from("workspaces")
           .delete()
