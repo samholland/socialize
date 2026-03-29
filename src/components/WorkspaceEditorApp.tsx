@@ -2,6 +2,7 @@
 
 import {
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -3628,6 +3629,14 @@ export default function WorkspaceEditorApp() {
     () => selectedProject?.campaigns.find((c) => c.id === selection.campaignId),
     [selectedProject, selection.campaignId]
   );
+  const selectedCampaignPrimaryText =
+    selectedCampaign &&
+    primaryTextDraftState.campaignId === selectedCampaign.id
+      ? primaryTextDraftState.value
+      : selectedCampaign?.primaryText ?? "";
+  const deferredSelectedCampaignPrimaryText = useDeferredValue(
+    selectedCampaignPrimaryText
+  );
   const selectedMedia = campaignMedia[selection.campaignId] ?? EMPTY_MEDIA;
   const presentationClient = useMemo(() => {
     if (!presentationTarget) return null;
@@ -5144,29 +5153,53 @@ export default function WorkspaceEditorApp() {
   function updateCampaignById(campaignId: string, patch: Partial<Campaign>) {
     if (activeCampaignEditingLocked && selectedCampaign?.id === campaignId) return;
     setData((prev) => {
-      let changed = false;
-      const nextClients = prev.clients.map((client) => {
-        let clientChanged = false;
-        const nextProjects = client.projects.map((project) => {
-          let projectChanged = false;
-          const nextCampaigns = project.campaigns.map((campaign) => {
-            if (campaign.id !== campaignId) return campaign;
-            const hasPatchDiff = Object.entries(patch).some(
-              ([key, value]) => campaign[key as keyof Campaign] !== value
-            );
-            if (!hasPatchDiff) return campaign;
-            changed = true;
-            projectChanged = true;
-            clientChanged = true;
-            return { ...campaign, ...patch, updatedAt: nowIso() };
-          });
-          if (!projectChanged) return project;
-          return { ...project, campaigns: nextCampaigns };
-        });
-        if (!clientChanged) return client;
-        return { ...client, projects: nextProjects };
-      });
-      if (!changed) return prev;
+      let clientIndex = -1;
+      let projectIndex = -1;
+      let campaignIndex = -1;
+
+      outer: for (let ci = 0; ci < prev.clients.length; ci += 1) {
+        const projects = prev.clients[ci].projects;
+        for (let pi = 0; pi < projects.length; pi += 1) {
+          const campaigns = projects[pi].campaigns;
+          const found = campaigns.findIndex((campaign) => campaign.id === campaignId);
+          if (found === -1) continue;
+          clientIndex = ci;
+          projectIndex = pi;
+          campaignIndex = found;
+          break outer;
+        }
+      }
+
+      if (clientIndex === -1 || projectIndex === -1 || campaignIndex === -1) {
+        return prev;
+      }
+
+      const currentCampaign =
+        prev.clients[clientIndex].projects[projectIndex].campaigns[campaignIndex];
+      const hasPatchDiff = Object.entries(patch).some(
+        ([key, value]) => currentCampaign[key as keyof Campaign] !== value
+      );
+      if (!hasPatchDiff) return prev;
+
+      const nextCampaign: Campaign = {
+        ...currentCampaign,
+        ...patch,
+        updatedAt: nowIso(),
+      };
+
+      const nextClients = prev.clients.slice();
+      const nextClient = { ...nextClients[clientIndex] };
+      nextClients[clientIndex] = nextClient;
+
+      const nextProjects = nextClient.projects.slice();
+      nextClient.projects = nextProjects;
+      const nextProject = { ...nextProjects[projectIndex] };
+      nextProjects[projectIndex] = nextProject;
+
+      const nextCampaigns = nextProject.campaigns.slice();
+      nextProject.campaigns = nextCampaigns;
+      nextCampaigns[campaignIndex] = nextCampaign;
+
       return { clients: nextClients };
     });
   }
@@ -8633,10 +8666,7 @@ export default function WorkspaceEditorApp() {
       primaryGoal: project.primaryGoal,
       cta: campaign.cta,
     });
-    const primaryTextValue =
-      primaryTextDraftState.campaignId === campaign.id
-        ? primaryTextDraftState.value
-        : campaign.primaryText;
+    const primaryTextValue = selectedCampaignPrimaryText;
     const bodyCopyCharacterCount = primaryTextValue.length;
     const isEditingCampaignTitle = editingCampaignTitleId === campaign.id;
 
@@ -9536,7 +9566,7 @@ export default function WorkspaceEditorApp() {
               <div ref={previewExportRef} className="preview-export-surface">
                 <PreviewCanvas
                   ref={canvasRef}
-                  primaryText={campaign.primaryText}
+                  primaryText={deferredSelectedCampaignPrimaryText}
                   facebookPageName={campaign.facebookPageName}
                   headline={campaign.headline}
                   url={campaign.url}

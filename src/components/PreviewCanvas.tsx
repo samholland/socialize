@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import {
   FACEBOOK_FEED_OVERLAY_PATH,
   CANVAS_H,
@@ -238,6 +238,7 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const frameImageRef = useRef<HTMLImageElement | null>(null);
+  const drawScheduleRafRef = useRef<number | null>(null);
   const drawRef = useRef<
     (includeDebugOverlays?: boolean, transparentBackdrop?: boolean) => Promise<void>
   >(async () => {});
@@ -436,6 +437,17 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
   }
   drawRef.current = draw;
 
+  const scheduleDraw = useCallback(() => {
+    if (drawScheduleRafRef.current !== null) {
+      cancelAnimationFrame(drawScheduleRafRef.current);
+      drawScheduleRafRef.current = null;
+    }
+    drawScheduleRafRef.current = requestAnimationFrame(() => {
+      drawScheduleRafRef.current = null;
+      void drawRef.current();
+    });
+  }, []);
+
   function pointerToCanvasPoint(
     event: React.PointerEvent<HTMLCanvasElement>
   ): { x: number; y: number } | null {
@@ -554,7 +566,7 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
   }, []);
 
   useEffect(() => {
-    void draw();
+    scheduleDraw();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     primaryText,
@@ -585,6 +597,7 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     isDragging,
     isStoryCtaDragging,
     frameVersion,
+    scheduleDraw,
   ]);
 
   useEffect(() => {
@@ -645,6 +658,15 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
       setIsDragging(false);
     }
   }, [disableMediaInteractions]);
+
+  useEffect(() => {
+    return () => {
+      if (drawScheduleRafRef.current !== null) {
+        cancelAnimationFrame(drawScheduleRafRef.current);
+        drawScheduleRafRef.current = null;
+      }
+    };
+  }, []);
 
   function setFromFile(file: File) {
     const url = URL.createObjectURL(file);
