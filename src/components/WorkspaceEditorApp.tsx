@@ -1919,6 +1919,15 @@ export default function WorkspaceEditorApp() {
     Record<string, { audienceText: string; pillarsText: string }>
   >({});
   const [ctaColorDrafts, setCtaColorDrafts] = useState<Record<string, string>>({});
+  const [primaryTextDraftState, setPrimaryTextDraftState] = useState<{
+    campaignId: string;
+    value: string;
+    dirty: boolean;
+  }>({
+    campaignId: "",
+    value: "",
+    dirty: false,
+  });
 
   // Media per campaign
   const [campaignMedia, setCampaignMediaMap] = useState<Record<string, PreviewMedia>>({});
@@ -1938,6 +1947,12 @@ export default function WorkspaceEditorApp() {
   const previewBodyRef = useRef<HTMLDivElement>(null);
   const previewExportRef = useRef<HTMLDivElement>(null);
   const saveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const localPersistTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const localPersistPendingRef = useRef<{
+    workspaceId: string;
+    snapshot: WorkspaceStateSnapshot;
+  } | null>(null);
+  const primaryTextCommitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingDeepLinkRef = useRef<CampaignDeepLinkTarget | null>(null);
   const handledDeepLinkKeyRef = useRef("");
   const applyingDeepLinkRef = useRef(false);
@@ -2986,6 +3001,40 @@ export default function WorkspaceEditorApp() {
     ]
   );
 
+  const flushPendingLocalWorkspacePersist = useCallback(async (): Promise<void> => {
+    if (localPersistTimeoutRef.current) {
+      clearTimeout(localPersistTimeoutRef.current);
+      localPersistTimeoutRef.current = null;
+    }
+    const pending = localPersistPendingRef.current;
+    localPersistPendingRef.current = null;
+    if (!pending) return;
+    try {
+      await setLocalWorkspaceState(pending.workspaceId, pending.snapshot);
+    } catch (error) {
+      console.warn("Failed to persist local workspace state", error);
+    }
+  }, []);
+
+  const queueLocalWorkspacePersist = useCallback(
+    (workspaceId: string, snapshot: WorkspaceStateSnapshot): void => {
+      localPersistPendingRef.current = { workspaceId, snapshot };
+      if (localPersistTimeoutRef.current) {
+        clearTimeout(localPersistTimeoutRef.current);
+      }
+      localPersistTimeoutRef.current = setTimeout(() => {
+        const pending = localPersistPendingRef.current;
+        localPersistPendingRef.current = null;
+        localPersistTimeoutRef.current = null;
+        if (!pending) return;
+        void setLocalWorkspaceState(pending.workspaceId, pending.snapshot).catch((error) => {
+          console.warn("Failed to persist local workspace state", error);
+        });
+      }, 350);
+    },
+    []
+  );
+
   // ── Persistence ────────────────────────────────────────────────
 
   // Persist workspace list + active workspace id
@@ -3007,7 +3056,7 @@ export default function WorkspaceEditorApp() {
   useEffect(() => {
     if (!storageReady) return;
     if (!cloudEnabled || activeWorkspaceIsLocal) {
-      void setLocalWorkspaceState(activeWorkspaceId, {
+      queueLocalWorkspacePersist(activeWorkspaceId, {
         data,
         selection,
         level: selectionLevel,
@@ -3075,6 +3124,7 @@ export default function WorkspaceEditorApp() {
     activeWorkspaceId,
     activeWorkspaceRevision,
     workspaceSyncConflicts,
+    queueLocalWorkspacePersist,
   ]);
 
   /* eslint-disable react-hooks/exhaustive-deps */
@@ -3112,6 +3162,16 @@ export default function WorkspaceEditorApp() {
   useEffect(() => {
     return () => {
       if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
+      if (localPersistTimeoutRef.current) clearTimeout(localPersistTimeoutRef.current);
+      const pending = localPersistPendingRef.current;
+      if (pending) {
+        void setLocalWorkspaceState(pending.workspaceId, pending.snapshot).catch(() => {
+          // noop
+        });
+      }
+      localPersistPendingRef.current = null;
+      localPersistTimeoutRef.current = null;
+      if (primaryTextCommitTimeoutRef.current) clearTimeout(primaryTextCommitTimeoutRef.current);
     };
   }, []);
 
@@ -3605,6 +3665,56 @@ export default function WorkspaceEditorApp() {
       setEditingCampaignTitleDraft(selectedCampaign.name);
     }
   }, [selectedCampaign?.id, selectedCampaign?.name, editingCampaignTitleId]);
+
+  useEffect(() => {
+    if (primaryTextCommitTimeoutRef.current) {
+      clearTimeout(primaryTextCommitTimeoutRef.current);
+      primaryTextCommitTimeoutRef.current = null;
+    }
+    if (!selectedCampaign) {
+      setPrimaryTextDraftState({ campaignId: "", value: "", dirty: false });
+      return;
+    }
+    setPrimaryTextDraftState({
+      campaignId: selectedCampaign.id,
+      value: selectedCampaign.primaryText,
+      dirty: false,
+    });
+  }, [selectedCampaign?.id]);
+
+  useEffect(() => {
+    if (!selectedCampaign) return;
+    setPrimaryTextDraftState((prev) => {
+      if (prev.campaignId !== selectedCampaign.id) return prev;
+      if (prev.dirty) return prev;
+      if (prev.value === selectedCampaign.primaryText) return prev;
+      return { ...prev, value: selectedCampaign.primaryText };
+    });
+  }, [selectedCampaign?.id, selectedCampaign?.primaryText]);
+
+  useEffect(() => {
+    if (!primaryTextDraftState.dirty || !primaryTextDraftState.campaignId) return;
+    if (primaryTextCommitTimeoutRef.current) {
+      clearTimeout(primaryTextCommitTimeoutRef.current);
+    }
+    const { campaignId, value } = primaryTextDraftState;
+    primaryTextCommitTimeoutRef.current = setTimeout(() => {
+      updateCampaignById(campaignId, { primaryText: value });
+      setPrimaryTextDraftState((prev) => {
+        if (prev.campaignId !== campaignId || prev.value !== value) return prev;
+        if (!prev.dirty) return prev;
+        return { ...prev, dirty: false };
+      });
+      primaryTextCommitTimeoutRef.current = null;
+    }, 260);
+
+    return () => {
+      if (primaryTextCommitTimeoutRef.current) {
+        clearTimeout(primaryTextCommitTimeoutRef.current);
+        primaryTextCommitTimeoutRef.current = null;
+      }
+    };
+  }, [primaryTextDraftState]);
 
   useEffect(() => {
     if (!presentationOpen) return;
@@ -4752,6 +4862,8 @@ export default function WorkspaceEditorApp() {
     nextSelection?: Selection
   ) {
     setShowUserSettings(false);
+    flushPrimaryTextDraftCommit();
+    await flushPendingLocalWorkspacePersist();
     if (wsId === activeWorkspaceId) {
       if (nextSelection) setSelection(coerceSelection(data, nextSelection));
       if (nextLevel) setSelectionLevel(nextLevel);
@@ -5029,21 +5141,53 @@ export default function WorkspaceEditorApp() {
 
   // ── Update helpers ─────────────────────────────────────────────
 
+  function updateCampaignById(campaignId: string, patch: Partial<Campaign>) {
+    if (activeCampaignEditingLocked && selectedCampaign?.id === campaignId) return;
+    setData((prev) => {
+      let changed = false;
+      const nextClients = prev.clients.map((client) => {
+        let clientChanged = false;
+        const nextProjects = client.projects.map((project) => {
+          let projectChanged = false;
+          const nextCampaigns = project.campaigns.map((campaign) => {
+            if (campaign.id !== campaignId) return campaign;
+            const hasPatchDiff = Object.entries(patch).some(
+              ([key, value]) => campaign[key as keyof Campaign] !== value
+            );
+            if (!hasPatchDiff) return campaign;
+            changed = true;
+            projectChanged = true;
+            clientChanged = true;
+            return { ...campaign, ...patch, updatedAt: nowIso() };
+          });
+          if (!projectChanged) return project;
+          return { ...project, campaigns: nextCampaigns };
+        });
+        if (!clientChanged) return client;
+        return { ...client, projects: nextProjects };
+      });
+      if (!changed) return prev;
+      return { clients: nextClients };
+    });
+  }
+
   function updateCampaign(patch: Partial<Campaign>) {
     if (!selectedCampaign) return;
-    if (activeCampaignEditingLocked) return;
-    const id = selectedCampaign.id;
-    setData((prev) => ({
-      clients: prev.clients.map((cl) => ({
-        ...cl,
-        projects: cl.projects.map((pr) => ({
-          ...pr,
-          campaigns: pr.campaigns.map((c) =>
-            c.id === id ? { ...c, ...patch, updatedAt: nowIso() } : c
-          ),
-        })),
-      })),
-    }));
+    updateCampaignById(selectedCampaign.id, patch);
+  }
+
+  function flushPrimaryTextDraftCommit() {
+    if (primaryTextCommitTimeoutRef.current) {
+      clearTimeout(primaryTextCommitTimeoutRef.current);
+      primaryTextCommitTimeoutRef.current = null;
+    }
+    if (!primaryTextDraftState.dirty || !primaryTextDraftState.campaignId) return;
+    updateCampaignById(primaryTextDraftState.campaignId, {
+      primaryText: primaryTextDraftState.value,
+    });
+    setPrimaryTextDraftState((prev) =>
+      prev.dirty ? { ...prev, dirty: false } : prev
+    );
   }
 
   function updateClient(clientId: string, patch: Partial<Client>) {
@@ -5415,6 +5559,7 @@ export default function WorkspaceEditorApp() {
   // ── Tree navigation ────────────────────────────────────────────
 
   function selectClient(clientId: string) {
+    flushPrimaryTextDraftCommit();
     setShowUserSettings(false);
     const client = data.clients.find((c) => c.id === clientId);
     if (!client) return;
@@ -5429,6 +5574,7 @@ export default function WorkspaceEditorApp() {
   }
 
   function selectProject(clientId: string, projectId: string) {
+    flushPrimaryTextDraftCommit();
     setShowUserSettings(false);
     const project = data.clients
       .find((c) => c.id === clientId)
@@ -5443,6 +5589,7 @@ export default function WorkspaceEditorApp() {
   }
 
   function selectCampaign(clientId: string, projectId: string, campaignId: string) {
+    flushPrimaryTextDraftCommit();
     setShowUserSettings(false);
     setSelection({ clientId, projectId, campaignId });
     setSelectionLevel("campaign");
@@ -5459,6 +5606,7 @@ export default function WorkspaceEditorApp() {
 
   function openProjectPresentation() {
     if (!selectedClient || !selectedProject) return;
+    flushPrimaryTextDraftCommit();
     const campaigns = selectedProject.campaigns;
     const initialIndex = selection.campaignId
       ? campaigns.findIndex((campaign) => campaign.id === selection.campaignId)
@@ -6820,6 +6968,7 @@ export default function WorkspaceEditorApp() {
       nextSelection: Selection,
       nextLevel: SelectionLevel
     ) => {
+      flushPrimaryTextDraftCommit();
       if (workspaceId === activeWorkspaceId) {
         setSelection(coerceSelection(data, nextSelection));
         setSelectionLevel(nextLevel);
@@ -8484,7 +8633,11 @@ export default function WorkspaceEditorApp() {
       primaryGoal: project.primaryGoal,
       cta: campaign.cta,
     });
-    const bodyCopyCharacterCount = campaign.primaryText.length;
+    const primaryTextValue =
+      primaryTextDraftState.campaignId === campaign.id
+        ? primaryTextDraftState.value
+        : campaign.primaryText;
+    const bodyCopyCharacterCount = primaryTextValue.length;
     const isEditingCampaignTitle = editingCampaignTitleId === campaign.id;
 
     function beginCampaignTitleEdit() {
@@ -8764,7 +8917,7 @@ export default function WorkspaceEditorApp() {
                       <button
                         className="btn btn-ghost btn-sm"
                         onClick={() => {
-                          copyTextWithFeedback(campaign.primaryText, () => {
+                          copyTextWithFeedback(primaryTextValue, () => {
                             setCopyFlash(true);
                             setTimeout(() => setCopyFlash(false), 1200);
                           });
@@ -8778,8 +8931,15 @@ export default function WorkspaceEditorApp() {
                     <textarea
                       className="form-textarea form-textarea-body-copy"
                       rows={6}
-                      value={campaign.primaryText}
-                      onChange={(e) => updateCampaign({ primaryText: e.target.value })}
+                      value={primaryTextValue}
+                      onChange={(e) =>
+                        setPrimaryTextDraftState({
+                          campaignId: campaign.id,
+                          value: e.target.value,
+                          dirty: true,
+                        })
+                      }
+                      onBlur={flushPrimaryTextDraftCommit}
                       placeholder="Start writing…"
                     />
                     <div className="body-copy-meta">
