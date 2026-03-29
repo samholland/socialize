@@ -238,6 +238,7 @@ const PRESENT_CLIENT_PARAM_KEY = "pcl";
 const PRESENT_PROJECT_PARAM_KEY = "ppr";
 const PRESENT_CAMPAIGN_PARAM_KEY = "pad";
 const PRESENT_RAIL_PARAM_KEY = "rail";
+const PUBLIC_PRESENT_CAMPAIGN_PARAM_KEY = "campaign";
 
 const PLATFORM_OPTIONS: Platform[] = [
   "Instagram Feed",
@@ -1937,6 +1938,7 @@ export default function WorkspaceEditorApp() {
   // Copy flash
   const [copyFlash, setCopyFlash] = useState(false);
   const [copyLinkFlash, setCopyLinkFlash] = useState(false);
+  const [presentationLinkPending, setPresentationLinkPending] = useState(false);
 
   const canvasRef = useRef<PreviewCanvasHandle>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
@@ -2030,6 +2032,58 @@ export default function WorkspaceEditorApp() {
       url.searchParams.set(PRESENT_CAMPAIGN_PARAM_KEY, args.campaignId);
     } else {
       url.searchParams.delete(PRESENT_CAMPAIGN_PARAM_KEY);
+    }
+    url.searchParams.set(
+      PRESENT_RAIL_PARAM_KEY,
+      (args.showCopyRail ?? presentationShowCopyRail) ? "1" : "0"
+    );
+    return url.toString();
+  }
+
+  async function createPublicPresentationLink(args: {
+    workspaceId: string;
+    clientId: string;
+    projectId: string;
+    campaignId?: string;
+    showCopyRail?: boolean;
+  }): Promise<string> {
+    const accessToken = await getSessionAccessToken();
+    if (!accessToken) {
+      throw new Error("You must be signed in to create a public presentation link.");
+    }
+
+    const response = await fetch("/api/presentation-links", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        workspaceId: args.workspaceId,
+        clientId: args.clientId,
+        projectId: args.projectId,
+      }),
+    });
+    const json = (await response.json().catch(() => ({}))) as {
+      url?: string;
+      error?: string;
+    };
+    if (!response.ok) {
+      throw new Error(
+        typeof json.error === "string" && json.error.trim().length > 0
+          ? json.error
+          : "Unable to generate presentation link."
+      );
+    }
+    if (typeof json.url !== "string" || !json.url.trim()) {
+      throw new Error("Presentation link URL is missing.");
+    }
+
+    const url = new URL(json.url);
+    if (args.campaignId) {
+      url.searchParams.set(PUBLIC_PRESENT_CAMPAIGN_PARAM_KEY, args.campaignId);
+    } else {
+      url.searchParams.delete(PUBLIC_PRESENT_CAMPAIGN_PARAM_KEY);
     }
     url.searchParams.set(
       PRESENT_RAIL_PARAM_KEY,
@@ -5686,8 +5740,9 @@ export default function WorkspaceEditorApp() {
     setPresentationOpen(false);
   }
 
-  function copyProjectPresentationLink() {
+  async function copyProjectPresentationLink() {
     if (!presentationTarget && (!selectedClient || !selectedProject)) return;
+    if (presentationLinkPending) return;
     const target = presentationTarget ?? {
       workspaceId: activeWorkspaceId,
       clientId: selectedClient!.id,
@@ -5697,18 +5752,43 @@ export default function WorkspaceEditorApp() {
       presentationOpen && presentationCampaign
         ? presentationCampaign.id
         : selectedProject?.campaigns[0]?.id ?? "";
-    const link = presentationLinkForTarget({
-      workspaceId: target.workspaceId,
-      clientId: target.clientId,
-      projectId: target.projectId,
-      campaignId,
-      showCopyRail: presentationShowCopyRail,
-    });
-    if (!link) return;
-    copyTextWithFeedback(link, () => {
-      setPresentationCopyFlash(true);
-      setTimeout(() => setPresentationCopyFlash(false), 1200);
-    });
+    setPresentationLinkPending(true);
+    try {
+      const targetWorkspace = workspaces.find(
+        (workspace) => workspace.id === target.workspaceId
+      );
+      let link: string | null = null;
+      if (targetWorkspace && targetWorkspace.kind !== "local" && cloudEnabled) {
+        link = await createPublicPresentationLink({
+          workspaceId: target.workspaceId,
+          clientId: target.clientId,
+          projectId: target.projectId,
+          campaignId,
+          showCopyRail: presentationShowCopyRail,
+        });
+      } else {
+        link = presentationLinkForTarget({
+          workspaceId: target.workspaceId,
+          clientId: target.clientId,
+          projectId: target.projectId,
+          campaignId,
+          showCopyRail: presentationShowCopyRail,
+        });
+      }
+      if (!link) return;
+      copyTextWithFeedback(link, () => {
+        setPresentationCopyFlash(true);
+        setTimeout(() => setPresentationCopyFlash(false), 1200);
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "Unable to create a presentation link.";
+      alert(message);
+    } finally {
+      setPresentationLinkPending(false);
+    }
   }
 
   function toggleWorkspace(workspaceId: string) {
@@ -8411,15 +8491,17 @@ export default function WorkspaceEditorApp() {
             </button>
             <button
               className="btn btn-secondary btn-sm"
-              onClick={copyProjectPresentationLink}
-              disabled={project.campaigns.length === 0}
+              onClick={() => {
+                void copyProjectPresentationLink();
+              }}
+              disabled={project.campaigns.length === 0 || presentationLinkPending}
               title={
                 project.campaigns.length > 0
                   ? "Copy shareable presentation link"
                   : "Add at least one ad to generate a presentation link"
               }
             >
-              Copy Presentation Link
+              {presentationLinkPending ? "Creating Link..." : "Copy Presentation Link"}
             </button>
             <button
               className="btn btn-danger btn-sm"
@@ -9686,10 +9768,12 @@ export default function WorkspaceEditorApp() {
             )}
             <button
               className="btn btn-secondary btn-sm"
-              onClick={copyProjectPresentationLink}
-              disabled={presentationCampaignCount === 0}
+              onClick={() => {
+                void copyProjectPresentationLink();
+              }}
+              disabled={presentationCampaignCount === 0 || presentationLinkPending}
             >
-              Copy Link
+              {presentationLinkPending ? "Creating..." : "Copy Link"}
             </button>
             <button
               className="btn btn-secondary btn-sm"
