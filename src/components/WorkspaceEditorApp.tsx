@@ -1949,6 +1949,7 @@ export default function WorkspaceEditorApp() {
   const previewExportRef = useRef<HTMLDivElement>(null);
   const saveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const localPersistTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mediaHydrationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const localPersistPendingRef = useRef<{
     workspaceId: string;
     snapshot: WorkspaceStateSnapshot;
@@ -3053,32 +3054,38 @@ export default function WorkspaceEditorApp() {
     );
   }, [cloudEnabled, storageReady, activeWorkspaceId]);
 
-  // Persist current workspace data
+  // Persist local workspace snapshot (data + selection + level)
   useEffect(() => {
     if (!storageReady) return;
-    if (!cloudEnabled || activeWorkspaceIsLocal) {
-      queueLocalWorkspacePersist(activeWorkspaceId, {
-        data,
-        selection,
-        level: selectionLevel,
-      });
-      return;
-    }
+    if (cloudEnabled && !activeWorkspaceIsLocal) return;
+    queueLocalWorkspacePersist(activeWorkspaceId, {
+      data,
+      selection,
+      level: selectionLevel,
+    });
+  }, [
+    storageReady,
+    cloudEnabled,
+    activeWorkspaceIsLocal,
+    activeWorkspaceId,
+    data,
+    selection,
+    selectionLevel,
+    queueLocalWorkspacePersist,
+  ]);
+
+  // Persist cloud workspace data (debounced)
+  useEffect(() => {
+    if (!storageReady) return;
+    if (!cloudEnabled || activeWorkspaceIsLocal) return;
     if (!supabase || !authUser || !cloudHydrated) return;
     if (hydratedWorkspaceRef.current !== activeWorkspaceId) return;
     const dataSnapshot = data;
-    const dataSignature = JSON.stringify(dataSnapshot);
     const lastSavedSignature =
       cloudWorkspaceDataSignatureRef.current[activeWorkspaceId];
     if (lastSavedSignature === undefined) {
-      setCloudDataSignatureValue(activeWorkspaceId, dataSignature);
+      setCloudDataSignature(activeWorkspaceId, dataSnapshot);
       clearWorkspaceConflict(activeWorkspaceId);
-      return;
-    }
-    if (lastSavedSignature === dataSignature) {
-      if (workspaceSyncConflicts[activeWorkspaceId]) {
-        void resolveStaleWorkspaceConflict(activeWorkspaceId, dataSnapshot);
-      }
       return;
     }
     if (workspaceSyncConflicts[activeWorkspaceId]) {
@@ -3088,6 +3095,15 @@ export default function WorkspaceEditorApp() {
 
     if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
     saveDebounceRef.current = setTimeout(() => {
+      let dataSignature = "";
+      try {
+        dataSignature = JSON.stringify(dataSnapshot);
+      } catch {
+        return;
+      }
+      const latestSavedSignature =
+        cloudWorkspaceDataSignatureRef.current[activeWorkspaceId];
+      if (latestSavedSignature === dataSignature) return;
       void saveWorkspaceData(
         supabase,
         activeWorkspaceId,
@@ -3120,36 +3136,46 @@ export default function WorkspaceEditorApp() {
     authUser,
     cloudHydrated,
     data,
-    selection,
-    selectionLevel,
     activeWorkspaceId,
     activeWorkspaceRevision,
     workspaceSyncConflicts,
-    queueLocalWorkspacePersist,
   ]);
 
   /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     if (!storageReady) return;
-    const refs = collectRenderableMediaRefs(data);
-    if (refs.length === 0) return;
-
-    const missingMedia = refs.some((ref) => {
-      const media = campaignMedia[ref.campaignId];
-      return !media || media.kind === "none";
-    });
-    if (!missingMedia) return;
-
-    if (!cloudEnabled || activeWorkspaceIsLocal) {
-      void hydrateLocalMediaForWorkspace(activeWorkspaceId, data).catch((error) => {
-        console.error("Failed to rehydrate local media", error);
-      });
-      return;
+    if (mediaHydrationTimeoutRef.current) {
+      clearTimeout(mediaHydrationTimeoutRef.current);
+      mediaHydrationTimeoutRef.current = null;
     }
+    mediaHydrationTimeoutRef.current = setTimeout(() => {
+      const refs = collectRenderableMediaRefs(data);
+      if (refs.length === 0) return;
 
-    void hydrateSignedMediaForWorkspace(activeWorkspaceId, data).catch((error) => {
-      console.error("Failed to rehydrate signed media", error);
-    });
+      const missingMedia = refs.some((ref) => {
+        const media = campaignMedia[ref.campaignId];
+        return !media || media.kind === "none";
+      });
+      if (!missingMedia) return;
+
+      if (!cloudEnabled || activeWorkspaceIsLocal) {
+        void hydrateLocalMediaForWorkspace(activeWorkspaceId, data).catch((error) => {
+          console.error("Failed to rehydrate local media", error);
+        });
+        return;
+      }
+
+      void hydrateSignedMediaForWorkspace(activeWorkspaceId, data).catch((error) => {
+        console.error("Failed to rehydrate signed media", error);
+      });
+    }, 320);
+
+    return () => {
+      if (mediaHydrationTimeoutRef.current) {
+        clearTimeout(mediaHydrationTimeoutRef.current);
+        mediaHydrationTimeoutRef.current = null;
+      }
+    };
   }, [
     storageReady,
     cloudEnabled,
@@ -3164,6 +3190,7 @@ export default function WorkspaceEditorApp() {
     return () => {
       if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
       if (localPersistTimeoutRef.current) clearTimeout(localPersistTimeoutRef.current);
+      if (mediaHydrationTimeoutRef.current) clearTimeout(mediaHydrationTimeoutRef.current);
       const pending = localPersistPendingRef.current;
       if (pending) {
         void setLocalWorkspaceState(pending.workspaceId, pending.snapshot).catch(() => {
@@ -3172,6 +3199,7 @@ export default function WorkspaceEditorApp() {
       }
       localPersistPendingRef.current = null;
       localPersistTimeoutRef.current = null;
+      mediaHydrationTimeoutRef.current = null;
       if (primaryTextCommitTimeoutRef.current) clearTimeout(primaryTextCommitTimeoutRef.current);
     };
   }, []);
