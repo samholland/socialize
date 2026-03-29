@@ -730,7 +730,7 @@ async function drawFacebookFeedSurface(args: DrawFeedSurfaceArgs) {
   const engagement = facebookEngagementCounts(engagementPreset, engagementSeed);
   ctx.fillStyle = "#65676b";
   ctx.font = `500 ${14 * s}px ${FONT_STACK}`;
-  ctx.fillText(engagement.reactions, cardX + 23 * s, y + 24 * s);
+  ctx.fillText(engagement.reactions, cardX + 28 * s, y + 24 * s);
   ctx.textAlign = "right";
   ctx.fillText(
     `${engagement.comments} comments · ${engagement.shares} shares`,
@@ -742,7 +742,7 @@ async function drawFacebookFeedSurface(args: DrawFeedSurfaceArgs) {
     const reactIconSize = 14 * s;
     ctx.drawImage(
       fbReactLikeIcon,
-      cardX + 10 * s - reactIconSize / 2,
+      cardX + 16 * s - reactIconSize / 2,
       y + 18 * s - reactIconSize / 2,
       reactIconSize,
       reactIconSize
