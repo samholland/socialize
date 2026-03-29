@@ -70,7 +70,7 @@ type WorkspaceInviteRole = "member" | "owner";
 type CtaOption = "Learn More" | "Shop Now" | "Sign Up" | "Download";
 type MediaAspect = "1:1" | "3:4" | "9:16";
 type CampaignObjective = "Awareness" | "Consideration" | "Conversion";
-type CampaignStatus = "draft" | "ready";
+type CampaignStatus = "draft" | "ready" | "approved";
 type EngagementPreset = "low" | "medium" | "high";
 type SelectionLevel = "workspace" | "client" | "project" | "campaign";
 type DragDropMode = "move" | "copy";
@@ -235,8 +235,12 @@ const OBJECTIVE_OPTIONS: CampaignObjective[] = [
   "Conversion",
 ];
 const FEED_ASPECT_OPTIONS: MediaAspect[] = ["1:1", "3:4"];
-const ENGAGEMENT_PRESET_OPTIONS: EngagementPreset[] = ["low", "medium", "high"];
 const DEFAULT_ENGAGEMENT_PRESET: EngagementPreset = "medium";
+const ENGAGEMENT_DICE_ICON: Record<EngagementPreset, string> = {
+  low: "/images/socialize/ui_dice_low.svg",
+  medium: "/images/socialize/ui_dice_med.svg",
+  high: "/images/socialize/ui_dice_high.svg",
+};
 const DEFAULT_CTA_BG = "#f2f2f2";
 const EMPTY_MEDIA: PreviewMedia = { kind: "none" };
 
@@ -269,6 +273,18 @@ function randomEngagementSeed(): number {
     return (buf[0] >>> 0) || 1;
   }
   return Math.max(1, Math.floor(Math.random() * 0xffffffff));
+}
+
+function nextEngagementPreset(preset: EngagementPreset): EngagementPreset {
+  if (preset === "low") return "medium";
+  if (preset === "medium") return "high";
+  return "low";
+}
+
+function engagementPresetLabel(preset: EngagementPreset): string {
+  if (preset === "low") return "Low";
+  if (preset === "high") return "High";
+  return "Medium";
 }
 
 function isStoryPlatform(p: Platform): boolean {
@@ -340,6 +356,29 @@ function normalizePlatform(v: unknown): Platform {
 function normalizeObjective(v: unknown): CampaignObjective {
   if (v === "Consideration" || v === "Conversion") return v;
   return "Awareness";
+}
+
+function normalizeCampaignStatus(v: unknown): CampaignStatus {
+  if (v === "ready" || v === "approved") return v;
+  return "draft";
+}
+
+function nextCampaignStatus(status: CampaignStatus): CampaignStatus {
+  if (status === "draft") return "ready";
+  if (status === "ready") return "approved";
+  return "draft";
+}
+
+function campaignStatusLabel(status: CampaignStatus): string {
+  if (status === "ready") return "Ready";
+  if (status === "approved") return "Approved";
+  return "Draft";
+}
+
+function campaignStatusButtonClass(status: CampaignStatus): string {
+  if (status === "approved") return "btn-primary";
+  if (status === "ready") return "btn-success";
+  return "btn-secondary";
 }
 
 function normalizeSelectionLevel(v: unknown): SelectionLevel {
@@ -545,8 +584,7 @@ function normalizeCampaign(c: Campaign): Campaign {
       typeof (c as { url?: unknown }).url === "string"
         ? ((c as { url?: string }).url ?? "")
         : "",
-    status:
-      (c as { status?: unknown }).status === "ready" ? "ready" : "draft",
+    status: normalizeCampaignStatus((c as { status?: unknown }).status),
     mediaStoragePath:
       typeof (c as { mediaStoragePath?: unknown }).mediaStoragePath === "string"
         ? ((c as { mediaStoragePath?: string }).mediaStoragePath ?? "")
@@ -1750,6 +1788,9 @@ export default function WorkspaceEditorApp() {
   const [engagementSettings, setEngagementSettings] = useState<
     Record<string, { preset: EngagementPreset; seed: number }>
   >({});
+  const [engagementRollNonce, setEngagementRollNonce] = useState<
+    Record<string, number>
+  >({});
   const [draggingCampaignId, setDraggingCampaignId] = useState<string | null>(null);
   const [draggingCampaignPayload, setDraggingCampaignPayload] =
     useState<CampaignDragPayload | null>(null);
@@ -1938,6 +1979,18 @@ export default function WorkspaceEditorApp() {
     setWorkspaceRenameDraft(activeWorkspace.name);
     setWorkspaceNameFieldDraft(activeWorkspace.name);
   }, [activeWorkspace.name, renamingWorkspaceId]);
+
+  useEffect(() => {
+    if (!showUserSettings) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setShowUserSettings(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [showUserSettings]);
 
   useEffect(() => {
     setWorkspaceInviteEmailDraft("");
@@ -6515,7 +6568,9 @@ export default function WorkspaceEditorApp() {
                                           ) : (
                                             <span className="tree-campaign-main">
                                               <span className="tree-node-leading">
-                                                <IconTreeAd />
+                                                <span
+                                                  className={`status-dot tree-status-dot status-dot-${campaign.status}`}
+                                                />
                                               </span>
                                               <span className="tree-label tree-label-campaign">
                                                 {campaign.name}
@@ -7101,7 +7156,8 @@ export default function WorkspaceEditorApp() {
     );
   }
 
-  function renderUserSettingsView() {
+  function renderUserSettingsView(opts?: { modal?: boolean }) {
+    const inModal = opts?.modal === true;
     if (!cloudEnabled || !authUser) {
       return (
         <div className="empty-state">
@@ -7125,6 +7181,17 @@ export default function WorkspaceEditorApp() {
           <div className="context-header-meta">
             Update your display name and profile image.
           </div>
+          {inModal && (
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
+              <button
+                className="btn btn-secondary btn-sm"
+                type="button"
+                onClick={() => setShowUserSettings(false)}
+              >
+                Close
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="form-section" style={{ overflowY: "auto" }}>
@@ -7234,6 +7301,27 @@ export default function WorkspaceEditorApp() {
           </div>
         </div>
       </div>
+    );
+  }
+
+  function renderUserSettingsModal() {
+    if (!showUserSettings) return null;
+    return (
+      <>
+        <div
+          className="user-settings-backdrop"
+          onClick={() => setShowUserSettings(false)}
+          aria-hidden="true"
+        />
+        <div
+          className="user-settings-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="User settings"
+        >
+          {renderUserSettingsView({ modal: true })}
+        </div>
+      </>
     );
   }
 
@@ -7628,6 +7716,7 @@ export default function WorkspaceEditorApp() {
     const ctaColorDraft = ctaColorDrafts[campaign.id] ?? campaign.ctaBgColor;
     const engagementKey = engagementSettingKey(campaign.id);
     const engagement = engagementSettingForCampaign(campaign.id);
+    const engagementRollKey = engagementRollNonce[campaign.id] ?? 0;
     const showPresenceCard =
       cloudEnabled && !activeWorkspaceIsLocal && activeCampaignHasPresenceLock;
     const editorsSummary =
@@ -7785,42 +7874,43 @@ export default function WorkspaceEditorApp() {
               {(isInstagramFeed || isFacebookFeed || isInstagramReels) && (
                 <div className="form-group">
                   <label className="form-label">Engagement</label>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div className="toggle-pill">
-                      {ENGAGEMENT_PRESET_OPTIONS.map((preset) => (
-                        <button
-                          key={preset}
-                          type="button"
-                          className={`toggle-pill-btn ${engagement.preset === preset ? "is-active" : ""}`}
-                          onClick={() => {
-                            setEngagementSettings((prev) => ({
-                              ...prev,
-                              [engagementKey]: {
-                                preset,
-                                seed: prev[engagementKey]?.seed ?? engagement.seed,
-                              },
-                            }));
-                          }}
-                        >
-                          {preset[0].toUpperCase() + preset.slice(1)}
-                        </button>
-                      ))}
-                    </div>
+                  <div className="engagement-dice-row">
                     <button
                       type="button"
-                      className="btn btn-secondary btn-sm"
+                      className="engagement-dice-btn"
                       onClick={() => {
+                        const nextPreset = nextEngagementPreset(engagement.preset);
                         setEngagementSettings((prev) => ({
                           ...prev,
                           [engagementKey]: {
-                            preset: prev[engagementKey]?.preset ?? engagement.preset,
+                            preset: nextPreset,
                             seed: randomEngagementSeed(),
                           },
                         }));
+                        setEngagementRollNonce((prev) => ({
+                          ...prev,
+                          [campaign.id]: (prev[campaign.id] ?? 0) + 1,
+                        }));
                       }}
+                      title="Cycle engagement level and randomize metrics"
+                      aria-label={`Engagement ${engagementPresetLabel(
+                        engagement.preset
+                      )}. Click to cycle and randomize.`}
                     >
-                      Randomize
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        key={`${campaign.id}-${engagementRollKey}`}
+                        src={ENGAGEMENT_DICE_ICON[engagement.preset]}
+                        alt=""
+                        aria-hidden="true"
+                        className={`engagement-dice-icon${
+                          engagementRollKey > 0 ? " engagement-dice-icon-roll" : ""
+                        }`}
+                      />
                     </button>
+                    <span className="engagement-dice-label">
+                      {engagementPresetLabel(engagement.preset)}
+                    </span>
                   </div>
                 </div>
               )}
@@ -8043,21 +8133,21 @@ export default function WorkspaceEditorApp() {
                     Status
                   </div>
                   <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                    Mark when ready for review
+                    Click to cycle draft, ready, approved
                   </div>
                 </div>
                 <button
-                  className={`btn btn-sm ${campaign.status === "ready" ? "btn-primary" : "btn-secondary"}`}
+                  className={`btn btn-sm ${campaignStatusButtonClass(campaign.status)}`}
                   onClick={() =>
                     updateCampaign({
-                      status: campaign.status === "ready" ? "draft" : "ready",
+                      status: nextCampaignStatus(campaign.status),
                     })
                   }
                 >
                   <div
-                    className={`status-dot status-dot-${campaign.status === "ready" ? "ready" : "draft"}`}
+                    className={`status-dot status-dot-${campaign.status}`}
                   />
-                  {campaign.status === "ready" ? "Ready" : "Draft"}
+                  {campaignStatusLabel(campaign.status)}
                 </button>
               </div>
               </fieldset>
@@ -8475,21 +8565,6 @@ export default function WorkspaceEditorApp() {
 
   // ── Info Pane (right, when client/project selected) ─────────────
 
-  function renderUserSettingsInfoPane() {
-    return (
-      <div className="info-pane">
-        <div className="info-stat-block">
-          <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>
-            User settings
-          </div>
-          <div style={{ fontSize: 12, color: "var(--muted)" }}>
-            Profile preferences are shown in the middle pane.
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   function renderInfoPane() {
     if (selectionLevel === "workspace") {
       return (
@@ -8551,7 +8626,7 @@ export default function WorkspaceEditorApp() {
     }
 
     if (selectionLevel === "project" && selectedProject) {
-      const ready = selectedProject.campaigns.filter((c) => c.status === "ready").length;
+      const ready = selectedProject.campaigns.filter((c) => c.status !== "draft").length;
       return (
         <div className="info-pane">
           <div className="info-stat-grid">
@@ -8561,7 +8636,7 @@ export default function WorkspaceEditorApp() {
             </div>
             <div className="info-stat-block">
               <div className="info-stat-value">{ready}</div>
-              <div className="info-stat-label">Ready</div>
+              <div className="info-stat-label">Ready+</div>
             </div>
           </div>
           {selectedProject.audienceProfiles.length > 0 && (
@@ -9062,15 +9137,13 @@ export default function WorkspaceEditorApp() {
             borderRight: "1px solid var(--line)",
           }}
         >
-          {showUserSettings
-            ? renderUserSettingsView()
-            : selectionLevel === "client"
-              ? renderClientView()
-              : selectionLevel === "workspace"
-                ? renderWorkspaceView()
-                : selectionLevel === "project"
-                  ? renderProjectView()
-                  : renderCampaignEditor()}
+          {selectionLevel === "client"
+            ? renderClientView()
+            : selectionLevel === "workspace"
+              ? renderWorkspaceView()
+              : selectionLevel === "project"
+                ? renderProjectView()
+                : renderCampaignEditor()}
         </main>
 
         <ResizeHandle
@@ -9084,12 +9157,13 @@ export default function WorkspaceEditorApp() {
 
         {/* Preview pane */}
         <aside className="pane pane-preview">
-          {showUserSettings ? renderUserSettingsInfoPane() : renderPreview()}
+          {renderPreview()}
         </aside>
       </div>
 
       {/* Export panel */}
       {renderExportPanel()}
+      {renderUserSettingsModal()}
 
       {/* Undo toast */}
       {pendingUndo && (

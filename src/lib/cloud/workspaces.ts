@@ -22,7 +22,7 @@ export type CloudCampaign = {
   messagePillar: string;
   ctaBgColor: string;
   ctaTextColor: string;
-  status: "draft" | "ready";
+  status: "draft" | "ready" | "approved";
   updatedAt: string;
   mediaStoragePath?: string;
   mediaKind?: "none" | "image" | "video";
@@ -67,6 +67,11 @@ function normalizeSupabaseErrorMessage(error: unknown, fallback: string): string
     if (typeof code === "string" && code.trim().length > 0) return `${fallback} (${code})`;
   }
   return fallback;
+}
+
+function normalizeCampaignStatus(value: unknown): CloudCampaign["status"] {
+  if (value === "ready" || value === "approved") return value;
+  return "draft";
 }
 
 export async function ensureProfileAndPersonalWorkspace(
@@ -340,7 +345,7 @@ export async function loadWorkspaceData(
       messagePillar: c.message_pillar ?? "",
       ctaBgColor: c.cta_bg_color ?? "#f2f2f2",
       ctaTextColor: c.cta_text_color ?? "#111111",
-      status: c.status === "ready" ? "ready" : "draft",
+      status: normalizeCampaignStatus(c.status),
       updatedAt: c.updated_at ?? new Date().toISOString(),
       mediaStoragePath: c.media_storage_path ?? undefined,
       mediaKind:
@@ -453,7 +458,7 @@ export async function saveWorkspaceData(
     message_pillar: c.messagePillar ?? "",
     cta_bg_color: c.ctaBgColor ?? "#f2f2f2",
     cta_text_color: c.ctaTextColor ?? "#111111",
-    status: c.status === "ready" ? "ready" : "draft",
+    status: normalizeCampaignStatus(c.status),
     updated_at: c.updatedAt ?? new Date().toISOString(),
     media_storage_path: c.mediaStoragePath ?? null,
     media_kind: c.mediaKind ?? "none",
