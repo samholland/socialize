@@ -5,21 +5,43 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type PublicPresentationPageProps = {
-  params: {
-    token: string;
-  };
-  searchParams?: {
-    campaign?: string;
-    rail?: string;
-  };
+  params:
+    | {
+        token: string;
+      }
+    | Promise<{
+        token: string;
+      }>;
+  searchParams?:
+    | {
+        campaign?: string;
+        rail?: string;
+      }
+    | Promise<{
+        campaign?: string;
+        rail?: string;
+      }>;
 };
+
+function safeDecodeToken(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
 
 export default async function PublicPresentationPage({
   params,
   searchParams,
 }: PublicPresentationPageProps) {
-  const rawToken = typeof params.token === "string" ? params.token : "";
-  const token = decodeURIComponent(rawToken).trim();
+  const resolvedParams = await Promise.resolve(params);
+  const resolvedSearchParams = await Promise.resolve(searchParams ?? {});
+  const rawToken =
+    resolvedParams && typeof resolvedParams.token === "string"
+      ? resolvedParams.token
+      : "";
+  const token = safeDecodeToken(rawToken).trim();
   const presentation = await loadPublicPresentationByToken(token);
 
   if (!presentation) {
@@ -34,10 +56,10 @@ export default async function PublicPresentationPage({
   }
 
   const initialCampaignId =
-    typeof searchParams?.campaign === "string"
-      ? searchParams.campaign.trim()
+    typeof resolvedSearchParams?.campaign === "string"
+      ? resolvedSearchParams.campaign.trim()
       : undefined;
-  const initialShowCopyRail = searchParams?.rail !== "0";
+  const initialShowCopyRail = resolvedSearchParams?.rail !== "0";
 
   return (
     <PublicPresentationViewer

@@ -1939,6 +1939,9 @@ export default function WorkspaceEditorApp() {
   const [copyFlash, setCopyFlash] = useState(false);
   const [copyLinkFlash, setCopyLinkFlash] = useState(false);
   const [presentationLinkPending, setPresentationLinkPending] = useState(false);
+  const [presentationLinkRevoking, setPresentationLinkRevoking] = useState(false);
+  const [projectHasPublicPresentationLink, setProjectHasPublicPresentationLink] =
+    useState(false);
 
   const canvasRef = useRef<PreviewCanvasHandle>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
@@ -2090,6 +2093,36 @@ export default function WorkspaceEditorApp() {
       (args.showCopyRail ?? presentationShowCopyRail) ? "1" : "0"
     );
     return url.toString();
+  }
+
+  async function loadProjectPublicPresentationLinkState(
+    workspaceId: string,
+    projectId: string
+  ): Promise<boolean> {
+    const accessToken = await getSessionAccessToken();
+    if (!accessToken) return false;
+    const query = new URLSearchParams({
+      workspaceId,
+      projectId,
+    });
+    const response = await fetch(`/api/presentation-links?${query.toString()}`, {
+      method: "GET",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+      },
+    });
+    const json = (await response.json().catch(() => ({}))) as {
+      exists?: boolean;
+      error?: string;
+    };
+    if (!response.ok) {
+      throw new Error(
+        typeof json.error === "string" && json.error.trim().length > 0
+          ? json.error
+          : "Unable to load presentation link status."
+      );
+    }
+    return json.exists === true;
   }
 
   function copyTextWithFeedback(
@@ -3742,6 +3775,49 @@ export default function WorkspaceEditorApp() {
     presentationCampaigns[clampedPresentationSlideIndex] ?? null;
   const presentationMedia =
     presentationCampaign ? campaignMedia[presentationCampaign.id] ?? EMPTY_MEDIA : EMPTY_MEDIA;
+  const presentationTargetWorkspaceIsLocal = useMemo(() => {
+    if (!presentationTarget) return false;
+    return (
+      workspaces.find((workspace) => workspace.id === presentationTarget.workspaceId)?.kind ===
+      "local"
+    );
+  }, [presentationTarget, workspaces]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!storageReady || !selectedProject || !cloudEnabled || activeWorkspaceIsLocal) {
+      setProjectHasPublicPresentationLink(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setProjectHasPublicPresentationLink(false);
+    void (async () => {
+      try {
+        const hasPublicLink = await loadProjectPublicPresentationLinkState(
+          activeWorkspaceId,
+          selectedProject.id
+        );
+        if (cancelled) return;
+        setProjectHasPublicPresentationLink(hasPublicLink);
+      } catch (error) {
+        if (cancelled) return;
+        console.warn("Failed to load project presentation link state", error);
+        setProjectHasPublicPresentationLink(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    storageReady,
+    selectedProject?.id,
+    activeWorkspaceId,
+    cloudEnabled,
+    activeWorkspaceIsLocal,
+  ]);
 
   useEffect(() => {
     if (!selectedCampaign) {
@@ -5776,6 +5852,9 @@ export default function WorkspaceEditorApp() {
         });
       }
       if (!link) return;
+      if (targetWorkspace && targetWorkspace.kind !== "local" && cloudEnabled) {
+        setProjectHasPublicPresentationLink(true);
+      }
       copyTextWithFeedback(link, () => {
         setPresentationCopyFlash(true);
         setTimeout(() => setPresentationCopyFlash(false), 1200);
@@ -5788,6 +5867,57 @@ export default function WorkspaceEditorApp() {
       alert(message);
     } finally {
       setPresentationLinkPending(false);
+    }
+  }
+
+  async function revokeProjectPresentationLink() {
+    if (!selectedProject) return;
+    if (activeWorkspaceIsLocal || !cloudEnabled) {
+      alert("Local workspace presentation links are not public.");
+      return;
+    }
+    if (presentationLinkRevoking) return;
+
+    const confirmed = window.confirm(
+      "Revoke the current public presentation link for this project?"
+    );
+    if (!confirmed) return;
+
+    setPresentationLinkRevoking(true);
+    try {
+      const accessToken = await getSessionAccessToken();
+      if (!accessToken) {
+        throw new Error("You must be signed in to revoke a public link.");
+      }
+      const response = await fetch("/api/presentation-links", {
+        method: "DELETE",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          workspaceId: activeWorkspaceId,
+          projectId: selectedProject.id,
+        }),
+      });
+      const json = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        throw new Error(
+          typeof json.error === "string" && json.error.trim().length > 0
+            ? json.error
+            : "Unable to revoke public presentation link."
+        );
+      }
+      setProjectHasPublicPresentationLink(false);
+      alert("Public presentation link revoked.");
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "Unable to revoke public presentation link.";
+      alert(message);
+    } finally {
+      setPresentationLinkRevoking(false);
     }
   }
 
@@ -8489,20 +8619,36 @@ export default function WorkspaceEditorApp() {
             >
               Present
             </button>
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={() => {
-                void copyProjectPresentationLink();
-              }}
-              disabled={project.campaigns.length === 0 || presentationLinkPending}
-              title={
-                project.campaigns.length > 0
-                  ? "Copy shareable presentation link"
-                  : "Add at least one ad to generate a presentation link"
-              }
-            >
-              {presentationLinkPending ? "Creating Link..." : "Copy Presentation Link"}
-            </button>
+            {!activeWorkspaceIsLocal && cloudEnabled && (
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  void copyProjectPresentationLink();
+                }}
+                disabled={project.campaigns.length === 0 || presentationLinkPending}
+                title={
+                  project.campaigns.length > 0
+                    ? "Copy shareable presentation link"
+                    : "Add at least one ad to generate a presentation link"
+                }
+              >
+                {presentationLinkPending ? "Creating Link..." : "Copy Presentation Link"}
+              </button>
+            )}
+            {!activeWorkspaceIsLocal &&
+              cloudEnabled &&
+              projectHasPublicPresentationLink && (
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  void revokeProjectPresentationLink();
+                }}
+                disabled={presentationLinkRevoking}
+                title="Revoke the current public presentation link for this project"
+              >
+                {presentationLinkRevoking ? "Revoking..." : "Revoke Public Link"}
+              </button>
+            )}
             <button
               className="btn btn-danger btn-sm"
               onClick={() => requestDeleteProject(client.id, project)}
@@ -9766,15 +9912,17 @@ export default function WorkspaceEditorApp() {
             {presentationCopyFlash && (
               <span className="copy-success">Link copied!</span>
             )}
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={() => {
-                void copyProjectPresentationLink();
-              }}
-              disabled={presentationCampaignCount === 0 || presentationLinkPending}
-            >
-              {presentationLinkPending ? "Creating..." : "Copy Link"}
-            </button>
+            {!presentationTargetWorkspaceIsLocal && cloudEnabled && (
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  void copyProjectPresentationLink();
+                }}
+                disabled={presentationCampaignCount === 0 || presentationLinkPending}
+              >
+                {presentationLinkPending ? "Creating..." : "Copy Link"}
+              </button>
+            )}
             <button
               className="btn btn-secondary btn-sm"
               onClick={() => setPresentationShowCopyRail((shown) => !shown)}

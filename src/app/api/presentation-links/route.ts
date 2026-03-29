@@ -15,6 +15,12 @@ type RevokePayload = {
   projectId?: string;
 };
 
+type PresentationLinkRow = {
+  id: string;
+  token: string;
+  expires_at: string | null;
+};
+
 function normalizeApiError(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) return error.message;
   if (error && typeof error === "object") {
@@ -53,6 +59,83 @@ function isIsoExpired(value: string | null): boolean {
 function shareUrlForToken(req: Request, token: string): string {
   const origin = new URL(req.url).origin;
   return `${origin}/p/${encodeURIComponent(token)}`;
+}
+
+async function findActivePresentationLink(
+  admin: ReturnType<typeof getServiceSupabaseClient>,
+  workspaceId: string,
+  projectId: string
+): Promise<PresentationLinkRow | null> {
+  const candidates = await listUnrevokedPresentationLinks(admin, workspaceId, projectId);
+  for (const row of candidates) {
+    if (!row?.token) continue;
+    if (isIsoExpired(row.expires_at ?? null)) continue;
+    return row;
+  }
+  return null;
+}
+
+async function listUnrevokedPresentationLinks(
+  admin: ReturnType<typeof getServiceSupabaseClient>,
+  workspaceId: string,
+  projectId: string
+): Promise<PresentationLinkRow[]> {
+  const { data: rows, error } = await admin
+    .from("presentation_share_links")
+    .select("id,token,expires_at")
+    .eq("workspace_id", workspaceId)
+    .eq("project_id", projectId)
+    .is("revoked_at", null)
+    .order("created_at", { ascending: false })
+    .limit(20);
+  if (error) {
+    throw error;
+  }
+
+  return Array.isArray(rows) ? (rows as PresentationLinkRow[]) : [];
+}
+
+export async function GET(req: Request) {
+  try {
+    const bearer = readBearerToken(req);
+    if (!bearer) {
+      return NextResponse.json({ error: "Missing bearer token" }, { status: 401 });
+    }
+
+    const url = new URL(req.url);
+    const workspaceId = url.searchParams.get("workspaceId")?.trim();
+    const projectId = url.searchParams.get("projectId")?.trim();
+    if (!workspaceId || !projectId) {
+      return NextResponse.json(
+        { error: "workspaceId and projectId are required" },
+        { status: 400 }
+      );
+    }
+
+    const admin = getServiceSupabaseClient();
+    const { data: userData, error: userErr } = await admin.auth.getUser(bearer);
+    if (userErr || !userData.user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const canAccess = await userCanAccessWorkspace(admin, userData.user.id, workspaceId);
+    if (!canAccess) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const activeLink = await findActivePresentationLink(admin, workspaceId, projectId);
+    return NextResponse.json({
+      ok: true,
+      exists: Boolean(activeLink),
+      token: activeLink?.token ?? null,
+      url: activeLink ? shareUrlForToken(req, activeLink.token) : null,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { error: normalizePresentationLinkError(error, "Unable to load presentation link.") },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST(req: Request) {
@@ -100,30 +183,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Project/client mismatch" }, { status: 400 });
     }
 
-    const { data: existingRows, error: existingErr } = await admin
-      .from("presentation_share_links")
-      .select("id,token,expires_at")
-      .eq("workspace_id", workspaceId)
-      .eq("project_id", projectId)
-      .is("revoked_at", null)
-      .order("created_at", { ascending: false })
-      .limit(1);
-    if (existingErr) {
-      return NextResponse.json(
-        { error: normalizePresentationLinkError(existingErr, "Failed to load existing links.") },
-        { status: 500 }
-      );
-    }
-
-    const existing = Array.isArray(existingRows) ? existingRows[0] : null;
-    if (existing && !isIsoExpired(existing.expires_at ?? null)) {
+    const unrevokedLinks = await listUnrevokedPresentationLinks(
+      admin,
+      workspaceId,
+      projectId
+    );
+    const existingActive = unrevokedLinks.find(
+      (row) => row?.token && !isIsoExpired(row.expires_at ?? null)
+    );
+    if (existingActive) {
       return NextResponse.json({
         ok: true,
-        token: existing.token,
-        url: shareUrlForToken(req, existing.token),
+        token: existingActive.token,
+        url: shareUrlForToken(req, existingActive.token),
         reused: true,
       });
     }
+
+    const existing = unrevokedLinks[0] ?? null;
 
     const nextToken = generateShareToken();
     if (existing?.id) {
