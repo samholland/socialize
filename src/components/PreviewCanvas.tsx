@@ -54,6 +54,8 @@ type Props = {
   storyCtaOffsetY?: number;
   engagementPreset?: "low" | "medium" | "high";
   engagementSeed?: number;
+  displayWidth?: number | string;
+  disableMediaInteractions?: boolean;
   onStoryCtaOffsetChange?: (offsetX: number, offsetY: number) => void;
   onMediaChange: (media: PreviewMedia) => void;
   onMediaFileSelected?: (file: File) => void;
@@ -223,13 +225,14 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     storyCtaOffsetY = 0,
     engagementPreset = "medium",
     engagementSeed = 1,
+    displayWidth = 340,
+    disableMediaInteractions = false,
     onStoryCtaOffsetChange,
     onMediaChange,
     onMediaFileSelected,
   }: Props,
   ref
 ) {
-  const DISPLAY_WIDTH = 340;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -637,6 +640,12 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
     };
   }, [media.kind]);
 
+  useEffect(() => {
+    if (disableMediaInteractions) {
+      setIsDragging(false);
+    }
+  }, [disableMediaInteractions]);
+
   function setFromFile(file: File) {
     const url = URL.createObjectURL(file);
     if (file.type.startsWith("image/")) {
@@ -662,6 +671,7 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
     e.stopPropagation();
+    if (disableMediaInteractions) return;
     setIsDragging(false);
     const file = e.dataTransfer.files?.[0];
     if (file) dispatchSelectedFile(file);
@@ -673,21 +683,25 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
 
   function onDragEnter(e: React.DragEvent) {
     e.preventDefault();
+    if (disableMediaInteractions) return;
     setIsDragging(true);
   }
 
   function onDragLeave(e: React.DragEvent) {
     e.preventDefault();
+    if (disableMediaInteractions) return;
     setIsDragging(false);
   }
 
   function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    if (disableMediaInteractions) return;
     const file = e.target.files?.[0];
     if (file) dispatchSelectedFile(file);
     e.target.value = "";
   }
 
   function handleCanvasClick() {
+    if (disableMediaInteractions) return;
     if (ignoreNextCanvasClickRef.current) {
       ignoreNextCanvasClickRef.current = false;
       return;
@@ -702,7 +716,7 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
       onDragOver={onDragOver}
       onDragEnter={onDragEnter}
       onDragLeave={onDragLeave}
-      style={{ position: "relative", display: "inline-block", width: DISPLAY_WIDTH }}
+      style={{ position: "relative", display: "inline-block", width: displayWidth }}
     >
       <input
         ref={fileInputRef}
@@ -735,7 +749,7 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
         onPointerCancel={(event) => stopStoryCtaDrag(event.pointerId)}
         onLostPointerCapture={(event) => stopStoryCtaDrag(event.pointerId)}
         style={{
-          width: DISPLAY_WIDTH,
+          width: displayWidth,
           display: "block",
           cursor: isStoryCtaDragging
             ? "grabbing"

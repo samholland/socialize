@@ -925,11 +925,18 @@ html, body {
   width: 100%;
   transition: background var(--t), color var(--t);
 }
+.tree-add-row svg {
+  opacity: 0.9;
+}
 .tree-add-row:hover { background: rgba(0, 122, 255, 0.08); color: var(--accent); }
+.tree-add-row.is-armed {
+  background: rgba(0, 122, 255, 0.2);
+  color: var(--accent);
+}
 .tree-add-row-project,
-.tree-add-row-campaign { color: var(--muted); font-size: 12.5px}
+.tree-add-row-campaign { color: var(--ink-3); font-size: 12.5px}
 .tree-add-row-project {
-  padding-left: 44px;
+  padding-left: 34px;
   font-weight: 500;
   padding-top: 7px;
   padding-bottom: 7px;
@@ -941,7 +948,7 @@ html, body {
 }
 
 .tree-add-row-campaign {
-  padding-left: 68px;
+  padding-left: 72px;
 }
 
 /* Platform pill in tree */
@@ -2424,6 +2431,143 @@ html, body {
   to {
     opacity: 1;
     transform: translateX(-50%) translateY(0);
+  }
+}
+
+/* ─── Presentation Overlay ───────────────────────────────────── */
+
+.presentation-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 180;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.presentation-topbar {
+  height: 62px;
+  border-bottom: 1px solid var(--line);
+  background: var(--pane);
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.presentation-topbar-copy {
+  min-width: 0;
+}
+
+.presentation-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.presentation-subtitle {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.presentation-topbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.presentation-main {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.presentation-copy-rail {
+  width: min(360px, 34vw);
+  min-width: 260px;
+  border-right: 1px solid var(--line);
+  background: var(--pane);
+  padding: 18px 16px;
+  overflow: auto;
+}
+
+.presentation-copy-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.presentation-copy-title {
+  font-size: 19px;
+  line-height: 1.25;
+  margin: 0 0 14px;
+  color: var(--ink);
+}
+
+.presentation-copy-label {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 5px;
+}
+
+.presentation-copy-body {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-bottom: 14px;
+}
+
+.presentation-empty-copy {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.presentation-stage {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px 20px;
+  overflow: auto;
+}
+
+.presentation-nav {
+  height: 62px;
+  border-top: 1px solid var(--line);
+  background: var(--pane);
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.presentation-nav-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+@media (max-width: 960px) {
+  .presentation-main {
+    flex-direction: column;
+  }
+
+  .presentation-copy-rail {
+    width: 100%;
+    min-width: 0;
+    max-height: 35vh;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
   }
 }
 

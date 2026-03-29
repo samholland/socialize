@@ -204,6 +204,15 @@ type CampaignDeepLinkTarget = {
   campaignId: string;
 };
 
+type ProjectPresentationDeepLinkTarget = {
+  key: string;
+  workspaceId: string;
+  clientId: string;
+  projectId: string;
+  campaignId: string;
+  showCopyRail: boolean | null;
+};
+
 // ─── Constants ───────────────────────────────────────────────────
 
 const LEGACY_STORAGE_KEY = "socialize.v1.workspace"; // for migration only
@@ -222,6 +231,12 @@ const WS_PARAM_KEY = "ws";
 const CLIENT_PARAM_KEY = "cl";
 const PROJECT_PARAM_KEY = "pr";
 const CAMPAIGN_PARAM_KEY = "ad";
+const PRESENT_PARAM_KEY = "present";
+const PRESENT_WS_PARAM_KEY = "pws";
+const PRESENT_CLIENT_PARAM_KEY = "pcl";
+const PRESENT_PROJECT_PARAM_KEY = "ppr";
+const PRESENT_CAMPAIGN_PARAM_KEY = "pad";
+const PRESENT_RAIL_PARAM_KEY = "rail";
 
 const PLATFORM_OPTIONS: Platform[] = [
   "Instagram Feed",
@@ -734,6 +749,22 @@ function deepLinkKeyFromTarget(target: {
   campaignId: string;
 }): string {
   return [target.workspaceId, target.clientId, target.projectId, target.campaignId].join("|");
+}
+
+function presentationDeepLinkKeyFromTarget(target: {
+  workspaceId: string;
+  clientId: string;
+  projectId: string;
+  campaignId: string;
+  showCopyRail: boolean | null;
+}): string {
+  return [
+    target.workspaceId,
+    target.clientId,
+    target.projectId,
+    target.campaignId,
+    target.showCopyRail === null ? "" : target.showCopyRail ? "1" : "0",
+  ].join("|");
 }
 
 function isLocalMediaStoragePath(path: string | undefined): path is string {
@@ -1881,6 +1912,7 @@ export default function WorkspaceEditorApp() {
   const [draggingProjectPayload, setDraggingProjectPayload] =
     useState<ProjectDragPayload | null>(null);
   const [projectDropWorkspaceId, setProjectDropWorkspaceId] = useState<string | null>(null);
+  const [armedTreeAddActionKey, setArmedTreeAddActionKey] = useState<string | null>(null);
 
   // Campaign settings drafts
   const [settingsDraft, setSettingsDraft] = useState<
@@ -1900,6 +1932,7 @@ export default function WorkspaceEditorApp() {
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const handoffNoticeTimeoutRef = useRef<number | null>(null);
   const handoffReleaseTimeoutRef = useRef<number | null>(null);
+  const armedTreeAddTimeoutRef = useRef<number | null>(null);
 
   // Preview body ref for auto-zoom
   const previewBodyRef = useRef<HTMLDivElement>(null);
@@ -1912,6 +1945,21 @@ export default function WorkspaceEditorApp() {
   const workspaceTreeDataRef = useRef<Record<string, AppData>>({});
   const cloudWorkspaceDataSignatureRef = useRef<Record<string, string>>({});
   const [pendingDeepLinkKey, setPendingDeepLinkKey] = useState<string | null>(null);
+  const pendingPresentationDeepLinkRef =
+    useRef<ProjectPresentationDeepLinkTarget | null>(null);
+  const handledPresentationDeepLinkKeyRef = useRef("");
+  const applyingPresentationDeepLinkRef = useRef(false);
+  const [pendingPresentationDeepLinkKey, setPendingPresentationDeepLinkKey] =
+    useState<string | null>(null);
+  const [presentationOpen, setPresentationOpen] = useState(false);
+  const [presentationTarget, setPresentationTarget] = useState<{
+    workspaceId: string;
+    clientId: string;
+    projectId: string;
+  } | null>(null);
+  const [presentationSlideIndex, setPresentationSlideIndex] = useState(0);
+  const [presentationShowCopyRail, setPresentationShowCopyRail] = useState(true);
+  const [presentationCopyFlash, setPresentationCopyFlash] = useState(false);
   const localWorkspace =
     workspaces.find((w) => w.kind === "local") ?? createLocalWorkspace();
   const activeWorkspace =
@@ -1945,6 +1993,31 @@ export default function WorkspaceEditorApp() {
     url.searchParams.set(CLIENT_PARAM_KEY, nextSelection.clientId);
     url.searchParams.set(PROJECT_PARAM_KEY, nextSelection.projectId);
     url.searchParams.set(CAMPAIGN_PARAM_KEY, nextSelection.campaignId);
+    return url.toString();
+  }
+
+  function presentationLinkForTarget(args: {
+    workspaceId: string;
+    clientId: string;
+    projectId: string;
+    campaignId?: string;
+    showCopyRail?: boolean;
+  }): string | null {
+    if (typeof window === "undefined") return null;
+    const url = new URL(window.location.href);
+    url.searchParams.set(PRESENT_PARAM_KEY, "1");
+    url.searchParams.set(PRESENT_WS_PARAM_KEY, args.workspaceId);
+    url.searchParams.set(PRESENT_CLIENT_PARAM_KEY, args.clientId);
+    url.searchParams.set(PRESENT_PROJECT_PARAM_KEY, args.projectId);
+    if (args.campaignId) {
+      url.searchParams.set(PRESENT_CAMPAIGN_PARAM_KEY, args.campaignId);
+    } else {
+      url.searchParams.delete(PRESENT_CAMPAIGN_PARAM_KEY);
+    }
+    url.searchParams.set(
+      PRESENT_RAIL_PARAM_KEY,
+      (args.showCopyRail ?? presentationShowCopyRail) ? "1" : "0"
+    );
     return url.toString();
   }
 
@@ -3219,6 +3292,36 @@ export default function WorkspaceEditorApp() {
   }, [searchParams]);
 
   useEffect(() => {
+    const present = cleanParam(searchParams.get(PRESENT_PARAM_KEY)) === "1";
+    if (!present) {
+      pendingPresentationDeepLinkRef.current = null;
+      setPendingPresentationDeepLinkKey(null);
+      return;
+    }
+    const target = {
+      workspaceId: cleanParam(searchParams.get(PRESENT_WS_PARAM_KEY)),
+      clientId: cleanParam(searchParams.get(PRESENT_CLIENT_PARAM_KEY)),
+      projectId: cleanParam(searchParams.get(PRESENT_PROJECT_PARAM_KEY)),
+      campaignId: cleanParam(searchParams.get(PRESENT_CAMPAIGN_PARAM_KEY)),
+      showCopyRail: (() => {
+        const raw = cleanParam(searchParams.get(PRESENT_RAIL_PARAM_KEY));
+        if (!raw) return null;
+        return raw !== "0";
+      })(),
+    };
+    if (!target.clientId || !target.projectId) {
+      pendingPresentationDeepLinkRef.current = null;
+      setPendingPresentationDeepLinkKey(null);
+      return;
+    }
+    const key = presentationDeepLinkKeyFromTarget(target);
+    pendingPresentationDeepLinkRef.current = { ...target, key };
+    if (handledPresentationDeepLinkKeyRef.current !== key) {
+      setPendingPresentationDeepLinkKey(key);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
     if (!pendingDeepLinkKey) return;
     const deepLinkReady =
       storageReady && (!cloudEnabled || (authReady && Boolean(authUser) && cloudHydrated));
@@ -3290,6 +3393,80 @@ export default function WorkspaceEditorApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     pendingDeepLinkKey,
+    storageReady,
+    cloudEnabled,
+    authReady,
+    authUser?.id,
+    cloudHydrated,
+    activeWorkspaceId,
+    workspaces,
+  ]);
+
+  useEffect(() => {
+    if (!pendingPresentationDeepLinkKey) return;
+    const deepLinkReady =
+      storageReady && (!cloudEnabled || (authReady && Boolean(authUser) && cloudHydrated));
+    if (!deepLinkReady) return;
+    if (applyingPresentationDeepLinkRef.current) return;
+    const target = pendingPresentationDeepLinkRef.current;
+    if (!target || target.key !== pendingPresentationDeepLinkKey) return;
+
+    applyingPresentationDeepLinkRef.current = true;
+    void (async () => {
+      try {
+        const targetWorkspaceId = target.workspaceId || activeWorkspaceId;
+        const targetWorkspace = workspaces.find(
+          (workspace) => workspace.id === targetWorkspaceId
+        );
+        if (!targetWorkspace) {
+          alert("This presentation link points to a workspace you cannot access.");
+          return;
+        }
+        const targetData = await getWorkspaceDataForTransfer(targetWorkspaceId);
+        if (!targetData) {
+          alert("Unable to load the linked workspace.");
+          return;
+        }
+        const client = targetData.clients.find(
+          (candidate) => candidate.id === target.clientId
+        );
+        const project = client?.projects.find(
+          (candidate) => candidate.id === target.projectId
+        );
+        if (!client || !project) {
+          alert("This presentation link is no longer valid.");
+          return;
+        }
+
+        const firstCampaignId = project.campaigns[0]?.id ?? "";
+        const resolvedSelection: Selection = {
+          clientId: client.id,
+          projectId: project.id,
+          campaignId: firstCampaignId,
+        };
+        await switchWorkspace(targetWorkspaceId, "project", resolvedSelection);
+        setPresentationTarget({
+          workspaceId: targetWorkspaceId,
+          clientId: client.id,
+          projectId: project.id,
+        });
+        const campaignIndex = target.campaignId
+          ? project.campaigns.findIndex((campaign) => campaign.id === target.campaignId)
+          : 0;
+        setPresentationSlideIndex(campaignIndex >= 0 ? campaignIndex : 0);
+        if (target.showCopyRail !== null) {
+          setPresentationShowCopyRail(target.showCopyRail);
+        }
+        setPresentationOpen(true);
+      } finally {
+        handledPresentationDeepLinkKeyRef.current = pendingPresentationDeepLinkKey;
+        applyingPresentationDeepLinkRef.current = false;
+        setPendingPresentationDeepLinkKey(null);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    pendingPresentationDeepLinkKey,
     storageReady,
     cloudEnabled,
     authReady,
@@ -3392,6 +3569,28 @@ export default function WorkspaceEditorApp() {
     [selectedProject, selection.campaignId]
   );
   const selectedMedia = campaignMedia[selection.campaignId] ?? EMPTY_MEDIA;
+  const presentationClient = useMemo(() => {
+    if (!presentationTarget) return null;
+    return data.clients.find((client) => client.id === presentationTarget.clientId) ?? null;
+  }, [data, presentationTarget]);
+  const presentationProject = useMemo(() => {
+    if (!presentationClient || !presentationTarget) return null;
+    return (
+      presentationClient.projects.find(
+        (project) => project.id === presentationTarget.projectId
+      ) ?? null
+    );
+  }, [presentationClient, presentationTarget]);
+  const presentationCampaigns = presentationProject?.campaigns ?? [];
+  const presentationCampaignCount = presentationCampaigns.length;
+  const clampedPresentationSlideIndex =
+    presentationCampaignCount > 0
+      ? Math.max(0, Math.min(presentationSlideIndex, presentationCampaignCount - 1))
+      : 0;
+  const presentationCampaign =
+    presentationCampaigns[clampedPresentationSlideIndex] ?? null;
+  const presentationMedia =
+    presentationCampaign ? campaignMedia[presentationCampaign.id] ?? EMPTY_MEDIA : EMPTY_MEDIA;
 
   useEffect(() => {
     if (!selectedCampaign) {
@@ -3406,6 +3605,100 @@ export default function WorkspaceEditorApp() {
       setEditingCampaignTitleDraft(selectedCampaign.name);
     }
   }, [selectedCampaign?.id, selectedCampaign?.name, editingCampaignTitleId]);
+
+  useEffect(() => {
+    if (!presentationOpen) return;
+    if (!presentationTarget) return;
+    if (!presentationProject) {
+      setPresentationOpen(false);
+      setPresentationTarget(null);
+      return;
+    }
+    if (presentationCampaignCount === 0) {
+      setPresentationSlideIndex(0);
+      return;
+    }
+    if (presentationSlideIndex >= presentationCampaignCount) {
+      setPresentationSlideIndex(presentationCampaignCount - 1);
+    }
+  }, [
+    presentationOpen,
+    presentationTarget,
+    presentationProject,
+    presentationCampaignCount,
+    presentationSlideIndex,
+  ]);
+
+  useEffect(() => {
+    if (!presentationOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setPresentationOpen(false);
+        return;
+      }
+      if (
+        event.key === "ArrowRight" ||
+        event.key === "PageDown" ||
+        event.key === " "
+      ) {
+        event.preventDefault();
+        setPresentationSlideIndex((index) =>
+          presentationCampaignCount > 0
+            ? Math.min(index + 1, presentationCampaignCount - 1)
+            : 0
+        );
+        return;
+      }
+      if (event.key === "ArrowLeft" || event.key === "PageUp") {
+        event.preventDefault();
+        setPresentationSlideIndex((index) => Math.max(index - 1, 0));
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [presentationOpen, presentationCampaignCount]);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    if (pendingPresentationDeepLinkKey) return;
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (presentationOpen && presentationTarget) {
+      url.searchParams.set(PRESENT_PARAM_KEY, "1");
+      url.searchParams.set(PRESENT_WS_PARAM_KEY, presentationTarget.workspaceId);
+      url.searchParams.set(PRESENT_CLIENT_PARAM_KEY, presentationTarget.clientId);
+      url.searchParams.set(PRESENT_PROJECT_PARAM_KEY, presentationTarget.projectId);
+      if (presentationCampaign?.id) {
+        url.searchParams.set(PRESENT_CAMPAIGN_PARAM_KEY, presentationCampaign.id);
+      } else {
+        url.searchParams.delete(PRESENT_CAMPAIGN_PARAM_KEY);
+      }
+      url.searchParams.set(PRESENT_RAIL_PARAM_KEY, presentationShowCopyRail ? "1" : "0");
+    } else {
+      url.searchParams.delete(PRESENT_PARAM_KEY);
+      url.searchParams.delete(PRESENT_WS_PARAM_KEY);
+      url.searchParams.delete(PRESENT_CLIENT_PARAM_KEY);
+      url.searchParams.delete(PRESENT_PROJECT_PARAM_KEY);
+      url.searchParams.delete(PRESENT_CAMPAIGN_PARAM_KEY);
+      url.searchParams.delete(PRESENT_RAIL_PARAM_KEY);
+    }
+    const nextSearch = url.searchParams.toString();
+    const currentSearch = window.location.search.startsWith("?")
+      ? window.location.search.slice(1)
+      : window.location.search;
+    if (nextSearch === currentSearch) return;
+    const nextUrl = `${url.pathname}${nextSearch ? `?${nextSearch}` : ""}${url.hash}`;
+    window.history.replaceState(window.history.state, "", nextUrl);
+  }, [
+    storageReady,
+    pendingPresentationDeepLinkKey,
+    presentationOpen,
+    presentationTarget,
+    presentationCampaign?.id,
+    presentationShowCopyRail,
+  ]);
 
   const audienceOptions = useMemo(
     () => normalizeStringList(selectedProject?.audienceProfiles),
@@ -3476,6 +3769,15 @@ export default function WorkspaceEditorApp() {
       if (handoffReleaseTimeoutRef.current) {
         window.clearTimeout(handoffReleaseTimeoutRef.current);
         handoffReleaseTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (armedTreeAddTimeoutRef.current) {
+        window.clearTimeout(armedTreeAddTimeoutRef.current);
+        armedTreeAddTimeoutRef.current = null;
       }
     };
   }, []);
@@ -4763,6 +5065,26 @@ export default function WorkspaceEditorApp() {
     }));
   }
 
+  function clearTreeAddActionArm() {
+    if (armedTreeAddTimeoutRef.current) {
+      window.clearTimeout(armedTreeAddTimeoutRef.current);
+      armedTreeAddTimeoutRef.current = null;
+    }
+    setArmedTreeAddActionKey(null);
+  }
+
+  function armTreeAddAction(key: string) {
+    if (armedTreeAddTimeoutRef.current) {
+      window.clearTimeout(armedTreeAddTimeoutRef.current);
+      armedTreeAddTimeoutRef.current = null;
+    }
+    setArmedTreeAddActionKey(key);
+    armedTreeAddTimeoutRef.current = window.setTimeout(() => {
+      setArmedTreeAddActionKey((current) => (current === key ? null : current));
+      armedTreeAddTimeoutRef.current = null;
+    }, 1600);
+  }
+
   // ── Add ────────────────────────────────────────────────────────
 
   function addClient() {
@@ -5132,6 +5454,51 @@ export default function WorkspaceEditorApp() {
     copyTextWithFeedback(link, () => {
       setCopyLinkFlash(true);
       setTimeout(() => setCopyLinkFlash(false), 1200);
+    });
+  }
+
+  function openProjectPresentation() {
+    if (!selectedClient || !selectedProject) return;
+    const campaigns = selectedProject.campaigns;
+    const initialIndex = selection.campaignId
+      ? campaigns.findIndex((campaign) => campaign.id === selection.campaignId)
+      : 0;
+    setShowUserSettings(false);
+    setPresentationTarget({
+      workspaceId: activeWorkspaceId,
+      clientId: selectedClient.id,
+      projectId: selectedProject.id,
+    });
+    setPresentationSlideIndex(initialIndex >= 0 ? initialIndex : 0);
+    setPresentationOpen(true);
+  }
+
+  function closeProjectPresentation() {
+    setPresentationOpen(false);
+  }
+
+  function copyProjectPresentationLink() {
+    if (!presentationTarget && (!selectedClient || !selectedProject)) return;
+    const target = presentationTarget ?? {
+      workspaceId: activeWorkspaceId,
+      clientId: selectedClient!.id,
+      projectId: selectedProject!.id,
+    };
+    const campaignId =
+      presentationOpen && presentationCampaign
+        ? presentationCampaign.id
+        : selectedProject?.campaigns[0]?.id ?? "";
+    const link = presentationLinkForTarget({
+      workspaceId: target.workspaceId,
+      clientId: target.clientId,
+      projectId: target.projectId,
+      campaignId,
+      showCopyRail: presentationShowCopyRail,
+    });
+    if (!link) return;
+    copyTextWithFeedback(link, () => {
+      setPresentationCopyFlash(true);
+      setTimeout(() => setPresentationCopyFlash(false), 1200);
     });
   }
 
@@ -6571,6 +6938,7 @@ export default function WorkspaceEditorApp() {
                     isWorkspaceActive &&
                     editingName?.kind === "client" &&
                     editingName.clientId === client.id;
+                  const addProjectActionKey = `add-project:${workspace.id}:${client.id}`;
 
                   return (
                     <div key={client.id} className="tree-section">
@@ -6651,6 +7019,7 @@ export default function WorkspaceEditorApp() {
                               (uploadingTransferTargets[
                                 transferUploadTargetKey(project.id, workspace.id)
                               ] ?? 0) > 0;
+                            const addCampaignActionKey = `add-campaign:${workspace.id}:${project.id}`;
 
                             return (
                               <div key={project.id}>
@@ -6902,8 +7271,26 @@ export default function WorkspaceEditorApp() {
 
                                     {isWorkspaceActive && (
                                       <button
-                                        className="tree-add-row tree-add-row-campaign"
-                                        onClick={() => addCampaign(client.id, project.id)}
+                                        className={`tree-add-row tree-add-row-campaign${armedTreeAddActionKey === addCampaignActionKey ? " is-armed" : ""}`}
+                                        aria-label="Double-click to add ad"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          armTreeAddAction(addCampaignActionKey);
+                                        }}
+                                        onDoubleClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          clearTreeAddActionArm();
+                                          addCampaign(client.id, project.id);
+                                        }}
+                                        onKeyDown={(e) => {
+                                          if (e.key === "Enter" || e.key === " ") {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            clearTreeAddActionArm();
+                                            addCampaign(client.id, project.id);
+                                          }
+                                        }}
                                       >
                                         <IconPlus /> New Ad
                                       </button>
@@ -6916,9 +7303,26 @@ export default function WorkspaceEditorApp() {
 
                           {isWorkspaceActive && (
                             <button
-                              className="tree-add-row tree-add-row-project"
-                              aria-label={`Add project to ${client.name}`}
-                              onClick={() => addProject(client.id)}
+                              className={`tree-add-row tree-add-row-project${armedTreeAddActionKey === addProjectActionKey ? " is-armed" : ""}`}
+                              aria-label={`Double-click to add project to ${client.name}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                armTreeAddAction(addProjectActionKey);
+                              }}
+                              onDoubleClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                clearTreeAddActionArm();
+                                addProject(client.id);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  clearTreeAddActionArm();
+                                  addProject(client.id);
+                                }
+                              }}
                             >
                               <IconPlus /> Add Project
                             </button>
@@ -7782,7 +8186,31 @@ export default function WorkspaceEditorApp() {
           {project.primaryGoal && (
             <div className="context-header-meta">{project.primaryGoal}</div>
           )}
-          <div style={{ marginTop: 10 }}>
+          <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={openProjectPresentation}
+              disabled={project.campaigns.length === 0}
+              title={
+                project.campaigns.length > 0
+                  ? "Open full-screen presentation view"
+                  : "Add at least one ad to present this project"
+              }
+            >
+              Present
+            </button>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={copyProjectPresentationLink}
+              disabled={project.campaigns.length === 0}
+              title={
+                project.campaigns.length > 0
+                  ? "Copy shareable presentation link"
+                  : "Add at least one ad to generate a presentation link"
+              }
+            >
+              Copy Presentation Link
+            </button>
             <button
               className="btn btn-danger btn-sm"
               onClick={() => requestDeleteProject(client.id, project)}
@@ -8997,6 +9425,200 @@ export default function WorkspaceEditorApp() {
     );
   }
 
+  function renderPresentationOverlay() {
+    if (!presentationOpen || !presentationTarget || !presentationClient || !presentationProject) {
+      return null;
+    }
+
+    const campaign = presentationCampaign;
+    const slideLabel =
+      presentationCampaignCount > 0
+        ? `${clampedPresentationSlideIndex + 1} / ${presentationCampaignCount}`
+        : "0 / 0";
+
+    const activeEngagement = campaign
+      ? engagementSettingForCampaign(campaign.id, presentationTarget.workspaceId)
+      : { preset: "medium" as const, seed: 1 };
+    const activeStoryOffsetKey = campaign
+      ? storyCtaOffsetKey(campaign.id, presentationTarget.workspaceId)
+      : "";
+    const activeStoryOffset = campaign
+      ? storyCtaOffsets[activeStoryOffsetKey] ?? { x: 0, y: 0 }
+      : { x: 0, y: 0 };
+    const presentationBackdropColor = normalizeHex(
+      mockupBackdropColor,
+      DEFAULT_MOCKUP_BACKDROP
+    );
+    const canvasDisplayWidth = presentationShowCopyRail
+      ? "min(69.6vw, calc((100vh - 170px) * 0.675))"
+      : "min(98.4vw, calc((100vh - 130px) * 0.675))";
+
+    return (
+      <div className="presentation-overlay" role="dialog" aria-modal="true">
+        <div className="presentation-topbar">
+          <div className="presentation-topbar-copy">
+            <div className="presentation-title">{presentationProject.name}</div>
+            <div className="presentation-subtitle">
+              {presentationClient.name} · {slideLabel}
+            </div>
+          </div>
+          <div className="presentation-topbar-actions">
+            {presentationCopyFlash && (
+              <span className="copy-success">Link copied!</span>
+            )}
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={copyProjectPresentationLink}
+              disabled={presentationCampaignCount === 0}
+            >
+              Copy Link
+            </button>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => setPresentationShowCopyRail((shown) => !shown)}
+            >
+              {presentationShowCopyRail ? "Hide Copy" : "Show Copy"}
+            </button>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => {
+                if (document.fullscreenElement) {
+                  void document.exitFullscreen().catch(() => {
+                    // noop
+                  });
+                  return;
+                }
+                const element = document.documentElement;
+                if (element.requestFullscreen) {
+                  void element.requestFullscreen().catch(() => {
+                    // noop
+                  });
+                }
+              }}
+            >
+              Fullscreen
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={closeProjectPresentation}>
+              Close
+            </button>
+          </div>
+        </div>
+
+        <div className="presentation-main">
+          {presentationShowCopyRail && (
+            <aside className="presentation-copy-rail">
+              {campaign ? (
+                <>
+                  <div className="presentation-copy-meta">
+                    <span className="badge badge-platform">{campaign.platform}</span>
+                    <span className={`badge badge-${campaign.status}`}>
+                      {campaignStatusLabel(campaign.status)}
+                    </span>
+                  </div>
+                  <h3 className="presentation-copy-title">{campaign.name}</h3>
+                  <div className="presentation-copy-label">Body Copy</div>
+                  <div className="presentation-copy-body">
+                    {campaign.primaryText.trim() || "No body copy yet."}
+                  </div>
+                  {campaign.platform === "Facebook Feed" && (
+                    <>
+                      <div className="presentation-copy-label">Headline</div>
+                      <div className="presentation-copy-body">
+                        {campaign.headline.trim() || "—"}
+                      </div>
+                      <div className="presentation-copy-label">URL</div>
+                      <div className="presentation-copy-body">
+                        {campaign.url.trim() || "—"}
+                      </div>
+                    </>
+                  )}
+                  <div className="presentation-copy-label">CTA</div>
+                  <div className="presentation-copy-body">{campaign.cta || "—"}</div>
+                </>
+              ) : (
+                <div className="presentation-empty-copy">
+                  This project has no ads yet.
+                </div>
+              )}
+            </aside>
+          )}
+
+          <section
+            className="presentation-stage"
+            style={{ backgroundColor: presentationBackdropColor }}
+          >
+            {campaign ? (
+              <PreviewCanvas
+                primaryText={campaign.primaryText}
+                facebookPageName={campaign.facebookPageName}
+                headline={campaign.headline}
+                url={campaign.url}
+                cta={campaign.cta}
+                ctaVisible={campaign.ctaVisible}
+                ctaBgColor={campaign.ctaBgColor}
+                ctaTextColor={campaign.ctaTextColor}
+                platform={campaign.platform}
+                mediaAspect={campaign.mediaAspect}
+                clientName={presentationClient.name}
+                clientVerified={presentationClient.isVerified}
+                clientAvatarUrl={presentationClient.profileImageDataUrl}
+                media={presentationMedia}
+                instagramFeedOverlayEnabled={false}
+                mockupBackdropColor={mockupBackdropColor}
+                transparentPngExport={transparentPngExport}
+                storyCtaOffsetX={activeStoryOffset.x}
+                storyCtaOffsetY={activeStoryOffset.y}
+                engagementPreset={activeEngagement.preset}
+                engagementSeed={activeEngagement.seed}
+                onMediaChange={() => {
+                  // Presentation mode is view-only.
+                }}
+                disableMediaInteractions
+                displayWidth={canvasDisplayWidth}
+              />
+            ) : (
+              <div className="empty-state">
+                <h3>No ads in this project</h3>
+                <p>Add at least one ad to start presenting.</p>
+              </div>
+            )}
+          </section>
+        </div>
+
+        <div className="presentation-nav">
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() =>
+              setPresentationSlideIndex((index) => Math.max(index - 1, 0))
+            }
+            disabled={clampedPresentationSlideIndex <= 0}
+          >
+            Previous
+          </button>
+          <div className="presentation-nav-hint">
+            Use ← and → keys to navigate
+          </div>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={() =>
+              setPresentationSlideIndex((index) =>
+                presentationCampaignCount > 0
+                  ? Math.min(index + 1, presentationCampaignCount - 1)
+                  : 0
+              )
+            }
+            disabled={
+              presentationCampaignCount === 0 ||
+              clampedPresentationSlideIndex >= presentationCampaignCount - 1
+            }
+          >
+            Next
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // ── Info Pane (right, when client/project selected) ─────────────
 
   function renderInfoPane() {
@@ -9583,6 +10205,8 @@ export default function WorkspaceEditorApp() {
           {renderPreview()}
         </aside>
       </div>
+
+      {renderPresentationOverlay()}
 
       {/* Export panel */}
       {renderExportPanel()}
