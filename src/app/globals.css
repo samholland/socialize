@@ -36,6 +36,7 @@
   --danger-soft: rgba(255, 59, 48, 0.1);
   --success: #34c759;
   --success-soft: rgba(52, 199, 89, 0.12);
+  --body-copy-rule-color: rgba(60, 60, 67, 0.2);
 
   /* Radii */
   --r-xs: 6px;
@@ -70,6 +71,7 @@
   --accent-soft: rgba(0, 122, 255, 0.2);
   --danger-soft: rgba(255, 59, 48, 0.15);
   --success-soft: rgba(52, 199, 89, 0.15);
+  --body-copy-rule-color: rgba(235, 235, 245, 0.16);
   --tree-project-header-bg: #2a2a2e;
   --tree-nested-bg: #242428;
   --tree-icon-filter: brightness(0) invert(0.94);
@@ -1044,7 +1046,7 @@ html, body {
   padding: 20px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 20px;
   position: relative;
 }
 
@@ -1167,6 +1169,54 @@ html, body {
   flex-direction: column;
   gap: 14px;
   padding: 12px;
+}
+
+.campaign-editor-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.campaign-editor-fields .form-group {
+  gap: 7px;
+}
+
+.campaign-editor-fields .form-row {
+  margin-top: 2px;
+}
+
+.form-textarea-body-copy {
+  --body-copy-line-step: 1.5em;
+  min-height: 180px;
+  border: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 12px;
+  background-color: color-mix(in srgb, var(--pane) 95%, var(--pane-alt) 5%);
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent calc(var(--body-copy-line-step) - 1px),
+    var(--body-copy-rule-color) calc(var(--body-copy-line-step) - 1px),
+    var(--body-copy-rule-color) var(--body-copy-line-step)
+  );
+  background-origin: content-box;
+  background-clip: content-box;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.form-textarea-body-copy:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.body-copy-meta {
+  margin-top: 2px;
+  display: flex;
+  justify-content: flex-end;
+  font-size: 11.5px;
+  color: var(--muted);
 }
 
 .campaign-presence-overlay-stack {

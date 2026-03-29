@@ -8024,6 +8024,7 @@ export default function WorkspaceEditorApp() {
       primaryGoal: project.primaryGoal,
       cta: campaign.cta,
     });
+    const bodyCopyCharacterCount = campaign.primaryText.length;
     const isEditingCampaignTitle = editingCampaignTitleId === campaign.id;
 
     function beginCampaignTitleEdit() {
@@ -8244,6 +8245,7 @@ export default function WorkspaceEditorApp() {
                 <p className="ad-brief-text">{adBrief}</p>
               </div>
               <fieldset
+                className="campaign-editor-fields"
                 disabled={activeCampaignEditingLocked}
                 style={{ border: "none", margin: 0, padding: 0, minInlineSize: 0 }}
               >
@@ -8313,12 +8315,15 @@ export default function WorkspaceEditorApp() {
                     </div>
                   </div>
                   <textarea
-                    className="form-textarea"
+                    className="form-textarea form-textarea-body-copy"
                     rows={6}
                     value={campaign.primaryText}
                     onChange={(e) => updateCampaign({ primaryText: e.target.value })}
                     placeholder="Start writing…"
                   />
+                  <div className="body-copy-meta">
+                    {bodyCopyCharacterCount} characters
+                  </div>
                 </div>
 
                 {isFacebookFeed && (
