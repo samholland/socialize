@@ -63,7 +63,11 @@ export async function drawAvatarCircle(
   radius: number,
   clientName: string,
   clientAvatarUrl: string | undefined,
-  loadImageFromUrl: DrawFeedSurfaceArgs["loadImageFromUrl"]
+  loadImageFromUrl: DrawFeedSurfaceArgs["loadImageFromUrl"],
+  options?: {
+    borderColor?: string;
+    borderWidth?: number;
+  }
 ) {
   const avatarImage = await loadImageFromUrl(clientAvatarUrl);
 
@@ -95,8 +99,8 @@ export async function drawAvatarCircle(
 
   ctx.restore();
 
-  ctx.strokeStyle = "rgba(255,255,255,0.6)";
-  ctx.lineWidth = Math.max(1, radius * 0.08);
+  ctx.strokeStyle = options?.borderColor ?? "rgba(255,255,255,0.6)";
+  ctx.lineWidth = options?.borderWidth ?? Math.max(1, radius * 0.08);
   ctx.beginPath();
   ctx.arc(x, y, radius, 0, Math.PI * 2);
   ctx.stroke();

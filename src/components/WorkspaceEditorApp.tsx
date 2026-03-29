@@ -235,6 +235,36 @@ const CTA_OPTIONS: CtaOption[] = [
   "Sign Up",
   "Download",
 ];
+const FACEBOOK_CTA_OPTIONS: string[] = [
+  "Apply Now",
+  "Book Now",
+  "Buy Tickets",
+  "Call Now",
+  "Contact Us",
+  "Donate Now",
+  "Download",
+  "Explore More",
+  "Get Directions",
+  "Get Offer",
+  "Get Quote",
+  "Get Showtimes",
+  "Install Now",
+  "Learn More",
+  "Listen Now",
+  "Open Instant Experience",
+  "Order Now",
+  "Play Game",
+  "Request Time",
+  "See Details",
+  "See Menu",
+  "Send Message",
+  "Send WhatsApp Message",
+  "Shop Now",
+  "Sign Up",
+  "Subscribe",
+  "Use App",
+  "Watch More",
+];
 const OBJECTIVE_OPTIONS: CampaignObjective[] = [
   "Awareness",
   "Consideration",
@@ -7976,6 +8006,7 @@ export default function WorkspaceEditorApp() {
     const isInstagramReels = campaign.platform === "Instagram Reels";
     const isInstagramStory = campaign.platform === "Instagram Story";
     const isFacebookFeed = campaign.platform === "Facebook Feed";
+    const campaignCtaOptions = isFacebookFeed ? FACEBOOK_CTA_OPTIONS : CTA_OPTIONS;
     const ctaColorDraft = ctaColorDrafts[campaign.id] ?? campaign.ctaBgColor;
     const engagementKey = engagementSettingKey(campaign.id);
     const engagement = engagementSettingForCampaign(campaign.id);
@@ -8296,7 +8327,7 @@ export default function WorkspaceEditorApp() {
                   </div>
                 </div>
 
-                <div className="form-group">
+                <div className="form-group body-copy-group">
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                     <label className="form-label" style={{ margin: 0 }}>Body Copy</label>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -8314,15 +8345,17 @@ export default function WorkspaceEditorApp() {
                       </button>
                     </div>
                   </div>
-                  <textarea
-                    className="form-textarea form-textarea-body-copy"
-                    rows={6}
-                    value={campaign.primaryText}
-                    onChange={(e) => updateCampaign({ primaryText: e.target.value })}
-                    placeholder="Start writing…"
-                  />
-                  <div className="body-copy-meta">
-                    {bodyCopyCharacterCount} characters
+                  <div className="body-copy-field-shell">
+                    <textarea
+                      className="form-textarea form-textarea-body-copy"
+                      rows={6}
+                      value={campaign.primaryText}
+                      onChange={(e) => updateCampaign({ primaryText: e.target.value })}
+                      placeholder="Start writing…"
+                    />
+                    <div className="body-copy-meta">
+                      {bodyCopyCharacterCount} characters
+                    </div>
                   </div>
                 </div>
 
@@ -8383,7 +8416,7 @@ export default function WorkspaceEditorApp() {
                           updateCampaign({ cta: e.target.value })
                         }
                       >
-                        {CTA_OPTIONS.map((o) => (
+                        {campaignCtaOptions.map((o) => (
                           <option key={o} value={o}>{o}</option>
                         ))}
                       </select>
@@ -9470,12 +9503,9 @@ export default function WorkspaceEditorApp() {
           <div className="workspace-conflict-card">
             <div className="workspace-conflict-copy">
               <div className="workspace-conflict-title">
-                Choose how to resolve your changes
+                Changes were made in another session. What would you like to do?
               </div>
-              <div className="workspace-conflict-text">
-                This workspace changed in another session. You can discard your local edits
-                and load the latest cloud version, or keep your edits and save them to cloud.
-              </div>
+              
               <div className="workspace-conflict-detail">{activeWorkspaceSyncConflict}</div>
             </div>
             <div className="workspace-conflict-actions">

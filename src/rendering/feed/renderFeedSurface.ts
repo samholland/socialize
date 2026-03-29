@@ -387,7 +387,11 @@ async function drawInstagramFeedSurface(args: DrawFeedSurfaceArgs) {
     15.5 * s,
     clientName,
     clientAvatarUrl,
-    loadImageFromUrl
+    loadImageFromUrl,
+    {
+      borderColor: "#c8ccd1",
+      borderWidth: 0.5 * s,
+    }
   );
 
   const safeName = fitText(clientName || "brand", 18);
@@ -571,7 +575,7 @@ async function drawFacebookFeedSurface(args: DrawFeedSurfaceArgs) {
 
   const s = layout.scale;
   const screen = layout.screen;
-  const [fbLikeIcon, fbCommentIcon, fbShareIcon, fbHomeIcon, fbReelsIcon, fbFriendsIcon, fbMarketplaceIcon, fbNotificationIcon] = await Promise.all([
+  const [fbLikeIcon, fbCommentIcon, fbShareIcon, fbHomeIcon, fbReelsIcon, fbFriendsIcon, fbMarketplaceIcon, fbNotificationIcon, fbSponsoredIcon, fbReactLikeIcon] = await Promise.all([
     loadImageFromUrl("/images/fb_like.svg"),
     loadImageFromUrl("/images/fb_comment.svg"),
     loadImageFromUrl("/images/fb_share.svg"),
@@ -580,6 +584,8 @@ async function drawFacebookFeedSurface(args: DrawFeedSurfaceArgs) {
     loadImageFromUrl("/images/fb_friends.svg"),
     loadImageFromUrl("/images/fb_marketplace.svg"),
     loadImageFromUrl("/images/fb_notification.svg"),
+    loadImageFromUrl("/images/fb_sponsored.svg"),
+    loadImageFromUrl("/images/fb_react_like.png"),
   ]);
 
   clipScreen(ctx, layout);
@@ -600,7 +606,11 @@ async function drawFacebookFeedSurface(args: DrawFeedSurfaceArgs) {
     18 * s,
     clientName,
     clientAvatarUrl,
-    loadImageFromUrl
+    loadImageFromUrl,
+    {
+      borderColor: "#c8ccd1",
+      borderWidth: 0.5 * s,
+    }
   );
 
   const displayName = fitText((facebookPageName || clientName || " ").trim(), 26);
@@ -617,12 +627,29 @@ async function drawFacebookFeedSurface(args: DrawFeedSurfaceArgs) {
 
   ctx.fillStyle = "#65676b";
   ctx.font = `500 ${11.5 * s}px ${FONT_STACK}`;
-  ctx.fillText("Sponsored ·", nameX, y + 47 * s);
-  ctx.beginPath();
-  ctx.arc(nameX + 72 * s, y + 43 * s, 3 * s, 0, Math.PI * 2);
-  ctx.strokeStyle = "#65676b";
-  ctx.lineWidth = Math.max(1, 2.2 * s);
-  ctx.stroke();
+  const sponsoredLabel = "Sponsored ·";
+  ctx.fillText(sponsoredLabel, nameX, y + 47 * s);
+  if (fbSponsoredIcon) {
+    const sponsoredLabelWidth = ctx.measureText(sponsoredLabel).width;
+    const iconSize = 10 * s;
+    drawTintedImage(
+      ctx,
+      fbSponsoredIcon,
+      {
+        x: nameX + sponsoredLabelWidth + 2.5 * s,
+        y: y + 36.5 * s,
+        w: iconSize,
+        h: iconSize,
+      },
+      "#65676b"
+    );
+  } else {
+    ctx.beginPath();
+    ctx.arc(nameX + 72 * s, y + 43 * s, 3 * s, 0, Math.PI * 2);
+    ctx.strokeStyle = "#65676b";
+    ctx.lineWidth = Math.max(1, 2.2 * s);
+    ctx.stroke();
+  }
 
   drawMoreIcon(ctx, cardX + cardW - 33 * s, y + 16 * s, 1.6 * s, "#8a8d91");
   ctx.fillStyle = "#8a8d91";
@@ -711,10 +738,21 @@ async function drawFacebookFeedSurface(args: DrawFeedSurfaceArgs) {
     y + 24 * s
   );
   ctx.textAlign = "left";
-  ctx.fillStyle = "#2f73ff";
-  ctx.beginPath();
-  ctx.arc(cardX + 10 * s, y + 18 * s, 6 * s, 0, Math.PI * 2);
-  ctx.fill();
+  if (fbReactLikeIcon) {
+    const reactIconSize = 14 * s;
+    ctx.drawImage(
+      fbReactLikeIcon,
+      cardX + 10 * s - reactIconSize / 2,
+      y + 18 * s - reactIconSize / 2,
+      reactIconSize,
+      reactIconSize
+    );
+  } else {
+    ctx.fillStyle = "#2f73ff";
+    ctx.beginPath();
+    ctx.arc(cardX + 10 * s, y + 18 * s, 6 * s, 0, Math.PI * 2);
+    ctx.fill();
+  }
   y += reactionsH;
 
   ctx.fillStyle = "#f2f3f5";
