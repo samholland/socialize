@@ -46,6 +46,12 @@ import {
   type CloudEditorPresence,
 } from "@/lib/cloud/presence";
 import {
+  listIncomingCampaignHandoffRequests,
+  requestCampaignHandoff,
+  respondCampaignHandoffRequest,
+  type CloudIncomingHandoffRequest,
+} from "@/lib/cloud/handoff";
+import {
   getLocalWorkspaceState,
   listLocalMediaAssetsForWorkspace,
   listLocalWorkspaceStates,
@@ -824,7 +830,31 @@ function normalizePresenceLockErrorMessage(error: unknown): string {
   return message;
 }
 
-function presenceLabelFromEmail(email: string | null | undefined): string {
+function normalizeHandoffErrorMessage(error: unknown): string {
+  const message =
+    error instanceof Error && error.message
+      ? error.message
+      : "Unable to process handoff request.";
+  const lower = message.toLowerCase();
+  if (
+    (lower.includes("editor_handoff_requests") && lower.includes("does not exist")) ||
+    lower.includes("create_editor_handoff_request") ||
+    lower.includes("list_incoming_editor_handoff_requests") ||
+    lower.includes("respond_editor_handoff_request")
+  ) {
+    return "Handoff migration is missing. Run 20260328_editor_handoff_requests.sql.";
+  }
+  return message;
+}
+
+function presenceLabelFromIdentity(identity: {
+  displayName?: string | null;
+  email?: string | null;
+}): string {
+  if (typeof identity.displayName === "string" && identity.displayName.trim()) {
+    return identity.displayName.trim();
+  }
+  const email = identity.email;
   if (typeof email !== "string") return "Another editor";
   const normalized = email.trim();
   if (!normalized) return "Another editor";
@@ -848,9 +878,10 @@ function normalizeProfileSettingsErrorMessage(error: unknown): string {
   const lower = message.toLowerCase();
   if (
     (lower.includes("profiles") && lower.includes("display_name")) ||
-    (lower.includes("profiles") && lower.includes("profile_image_data_url"))
+    (lower.includes("profiles") && lower.includes("profile_image_data_url")) ||
+    (lower.includes("profiles") && lower.includes("status_text"))
   ) {
-    return "Profile settings migration is missing. Run 20260327_profile_settings_fields.sql and refresh.";
+    return "Profile settings migration is missing. Run 20260327_profile_settings_fields.sql and 20260328_profile_status_field.sql, then refresh.";
   }
   return message;
 }
@@ -1716,6 +1747,8 @@ export default function WorkspaceEditorApp() {
   const [showUserSettings, setShowUserSettings] = useState(false);
   const [profileDisplayNameSaved, setProfileDisplayNameSaved] = useState("");
   const [profileDisplayNameDraft, setProfileDisplayNameDraft] = useState("");
+  const [profileStatusSaved, setProfileStatusSaved] = useState("");
+  const [profileStatusDraft, setProfileStatusDraft] = useState("");
   const [profileImageDataUrlSaved, setProfileImageDataUrlSaved] = useState<string | null>(null);
   const [profileImageDataUrl, setProfileImageDataUrl] = useState<string | null>(null);
   const [profileSettingsLoading, setProfileSettingsLoading] = useState(false);
@@ -1753,7 +1786,18 @@ export default function WorkspaceEditorApp() {
   const [activeCampaignPresenceError, setActiveCampaignPresenceError] = useState<
     string | null
   >(null);
-  const [activeCampaignPresenceOverride, setActiveCampaignPresenceOverride] =
+  const [incomingHandoffRequests, setIncomingHandoffRequests] = useState<
+    CloudIncomingHandoffRequest[]
+  >([]);
+  const [incomingHandoffRequestsError, setIncomingHandoffRequestsError] = useState<
+    string | null
+  >(null);
+  const [requestHandoffPending, setRequestHandoffPending] = useState(false);
+  const [requestHandoffNotice, setRequestHandoffNotice] = useState<string | null>(null);
+  const [respondHandoffPendingId, setRespondHandoffPendingId] = useState<number | null>(
+    null
+  );
+  const [activeCampaignHandoffReleased, setActiveCampaignHandoffReleased] =
     useState(false);
 
   // Undo
@@ -1774,6 +1818,8 @@ export default function WorkspaceEditorApp() {
   const [renamingWorkspaceId, setRenamingWorkspaceId] = useState<string | null>(null);
   const [workspaceRenameDraft, setWorkspaceRenameDraft] = useState("");
   const [workspaceNameFieldDraft, setWorkspaceNameFieldDraft] = useState("");
+  const [editingCampaignTitleId, setEditingCampaignTitleId] = useState<string | null>(null);
+  const [editingCampaignTitleDraft, setEditingCampaignTitleDraft] = useState("");
 
   // Tree expand/collapse
   const [expandedWorkspaces, setExpandedWorkspaces] = useState<Record<string, boolean>>({});
@@ -1822,6 +1868,8 @@ export default function WorkspaceEditorApp() {
 
   const canvasRef = useRef<PreviewCanvasHandle>(null);
   const mediaInputRef = useRef<HTMLInputElement>(null);
+  const handoffNoticeTimeoutRef = useRef<number | null>(null);
+  const handoffReleaseTimeoutRef = useRef<number | null>(null);
 
   // Preview body ref for auto-zoom
   const previewBodyRef = useRef<HTMLDivElement>(null);
@@ -2149,6 +2197,8 @@ export default function WorkspaceEditorApp() {
     if (!cloudEnabled || !supabase || !authUser) {
       setProfileDisplayNameSaved("");
       setProfileDisplayNameDraft("");
+      setProfileStatusSaved("");
+      setProfileStatusDraft("");
       setProfileImageDataUrlSaved(null);
       setProfileImageDataUrl(null);
       setProfileSettingsError(null);
@@ -2161,19 +2211,23 @@ export default function WorkspaceEditorApp() {
     try {
       const { data: profileRow, error } = await supabase
         .from("profiles")
-        .select("email,display_name,profile_image_data_url")
+        .select("email,display_name,profile_image_data_url,status_text")
         .eq("user_id", authUser.id)
         .maybeSingle();
       if (error) throw error;
 
       const displayName =
         typeof profileRow?.display_name === "string" ? profileRow.display_name.trim() : "";
+      const statusText =
+        typeof profileRow?.status_text === "string" ? profileRow.status_text : "";
       const nextImage =
         typeof profileRow?.profile_image_data_url === "string"
           ? profileRow.profile_image_data_url
           : null;
       setProfileDisplayNameSaved(displayName);
       setProfileDisplayNameDraft(displayName);
+      setProfileStatusSaved(statusText);
+      setProfileStatusDraft(statusText);
       setProfileImageDataUrlSaved(nextImage);
       setProfileImageDataUrl(nextImage);
     } catch (error) {
@@ -2182,6 +2236,8 @@ export default function WorkspaceEditorApp() {
       const fallback = defaultProfileDisplayName(authUser.email ?? null);
       setProfileDisplayNameSaved(fallback);
       setProfileDisplayNameDraft(fallback);
+      setProfileStatusSaved("");
+      setProfileStatusDraft("");
       setProfileImageDataUrlSaved(null);
       setProfileImageDataUrl(null);
     } finally {
@@ -2192,6 +2248,7 @@ export default function WorkspaceEditorApp() {
   async function saveUserProfileSettings() {
     if (!cloudEnabled || !supabase || !authUser) return;
     const normalizedDisplayName = profileDisplayNameDraft.trim();
+    const normalizedStatus = profileStatusDraft;
     setProfileSettingsSaving(true);
     setProfileSettingsError(null);
     try {
@@ -2200,6 +2257,7 @@ export default function WorkspaceEditorApp() {
           user_id: authUser.id,
           email: authUser.email ?? "",
           display_name: normalizedDisplayName,
+          status_text: normalizedStatus,
           profile_image_data_url: profileImageDataUrl,
         },
         { onConflict: "user_id" }
@@ -2207,6 +2265,8 @@ export default function WorkspaceEditorApp() {
       if (error) throw error;
       setProfileDisplayNameSaved(normalizedDisplayName);
       setProfileDisplayNameDraft(normalizedDisplayName);
+      setProfileStatusSaved(normalizedStatus);
+      setProfileStatusDraft(normalizedStatus);
       setProfileImageDataUrlSaved(profileImageDataUrl);
     } catch (error) {
       console.warn("Failed to save profile settings", error);
@@ -3303,6 +3363,20 @@ export default function WorkspaceEditorApp() {
   );
   const selectedMedia = campaignMedia[selection.campaignId] ?? EMPTY_MEDIA;
 
+  useEffect(() => {
+    if (!selectedCampaign) {
+      setEditingCampaignTitleId(null);
+      setEditingCampaignTitleDraft("");
+      return;
+    }
+    if (editingCampaignTitleId && editingCampaignTitleId !== selectedCampaign.id) {
+      setEditingCampaignTitleId(null);
+    }
+    if (!editingCampaignTitleId) {
+      setEditingCampaignTitleDraft(selectedCampaign.name);
+    }
+  }, [selectedCampaign?.id, selectedCampaign?.name, editingCampaignTitleId]);
+
   const audienceOptions = useMemo(
     () => normalizeStringList(selectedProject?.audienceProfiles),
     [selectedProject?.audienceProfiles]
@@ -3325,7 +3399,10 @@ export default function WorkspaceEditorApp() {
   );
   const activeCampaignPresenceLabels = useMemo(() => {
     const labels = activeCampaignPresenceOthers.map((entry) =>
-      presenceLabelFromEmail(entry.email)
+      presenceLabelFromIdentity({
+        displayName: entry.displayName,
+        email: entry.email,
+      })
     );
     return Array.from(new Set(labels));
   }, [activeCampaignPresenceOthers]);
@@ -3335,8 +3412,7 @@ export default function WorkspaceEditorApp() {
     !activeWorkspaceIsLocal &&
     selectionLevel === "campaign" &&
     Boolean(selectedCampaign) &&
-    activeCampaignHasPresenceLock &&
-    !activeCampaignPresenceOverride;
+    (activeCampaignHasPresenceLock || activeCampaignHandoffReleased);
   const canCopyCampaignLink =
     !activeWorkspaceIsLocal &&
     selectionLevel === "campaign" &&
@@ -3345,8 +3421,34 @@ export default function WorkspaceEditorApp() {
     Boolean(selection.campaignId);
 
   useEffect(() => {
-    setActiveCampaignPresenceOverride(false);
+    setActiveCampaignHandoffReleased(false);
+    setIncomingHandoffRequests([]);
+    setIncomingHandoffRequestsError(null);
+    setRequestHandoffPending(false);
+    setRespondHandoffPendingId(null);
+    setRequestHandoffNotice(null);
+    if (handoffNoticeTimeoutRef.current) {
+      window.clearTimeout(handoffNoticeTimeoutRef.current);
+      handoffNoticeTimeoutRef.current = null;
+    }
+    if (handoffReleaseTimeoutRef.current) {
+      window.clearTimeout(handoffReleaseTimeoutRef.current);
+      handoffReleaseTimeoutRef.current = null;
+    }
   }, [activeWorkspaceId, selectedCampaign?.id]);
+
+  useEffect(() => {
+    return () => {
+      if (handoffNoticeTimeoutRef.current) {
+        window.clearTimeout(handoffNoticeTimeoutRef.current);
+        handoffNoticeTimeoutRef.current = null;
+      }
+      if (handoffReleaseTimeoutRef.current) {
+        window.clearTimeout(handoffReleaseTimeoutRef.current);
+        handoffReleaseTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!cloudEnabled || activeWorkspaceIsLocal || !supabase || !authUser) {
@@ -3373,7 +3475,9 @@ export default function WorkspaceEditorApp() {
 
     const refreshPresence = async () => {
       try {
-        await upsertCampaignEditorPresence(supabase, workspaceId, campaignId, 45);
+        if (!activeCampaignHandoffReleased) {
+          await upsertCampaignEditorPresence(supabase, workspaceId, campaignId, 45);
+        }
         const entries = await listCampaignEditorPresence(
           supabase,
           workspaceId,
@@ -3414,7 +3518,155 @@ export default function WorkspaceEditorApp() {
     activeWorkspaceId,
     selectionLevel,
     selectedCampaign?.id,
+    activeCampaignHandoffReleased,
   ]);
+
+  useEffect(() => {
+    if (!cloudEnabled || activeWorkspaceIsLocal || !supabase || !authUser) {
+      setIncomingHandoffRequests([]);
+      setIncomingHandoffRequestsError(null);
+      return;
+    }
+    if (selectionLevel !== "campaign" || !selectedCampaign) {
+      setIncomingHandoffRequests([]);
+      setIncomingHandoffRequestsError(null);
+      return;
+    }
+
+    const workspaceId = activeWorkspaceId;
+    const campaignId = selectedCampaign.id;
+    let cancelled = false;
+
+    const refreshIncomingRequests = async () => {
+      try {
+        const requests = await listIncomingCampaignHandoffRequests(
+          supabase,
+          workspaceId,
+          campaignId
+        );
+        if (cancelled) return;
+        setIncomingHandoffRequests(requests);
+        setIncomingHandoffRequestsError(null);
+      } catch (error) {
+        if (cancelled) return;
+        setIncomingHandoffRequestsError(normalizeHandoffErrorMessage(error));
+      }
+    };
+
+    void refreshIncomingRequests();
+    const pollId = window.setInterval(() => {
+      void refreshIncomingRequests();
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(pollId);
+    };
+  }, [
+    cloudEnabled,
+    activeWorkspaceIsLocal,
+    supabase,
+    authUser,
+    activeWorkspaceId,
+    selectionLevel,
+    selectedCampaign?.id,
+  ]);
+
+  function showRequestHandoffNotice(message: string) {
+    if (handoffNoticeTimeoutRef.current) {
+      window.clearTimeout(handoffNoticeTimeoutRef.current);
+      handoffNoticeTimeoutRef.current = null;
+    }
+    setRequestHandoffNotice(message);
+    handoffNoticeTimeoutRef.current = window.setTimeout(() => {
+      setRequestHandoffNotice(null);
+      handoffNoticeTimeoutRef.current = null;
+    }, 4500);
+  }
+
+  async function requestActiveCampaignHandoff() {
+    if (!supabase || !selectedCampaign) return;
+    const recipientIds = Array.from(
+      new Set(
+        activeCampaignPresenceOthers
+          .map((entry) => entry.userId)
+          .filter((userId) => typeof userId === "string" && userId.length > 0)
+      )
+    );
+    if (recipientIds.length === 0) return;
+
+    setRequestHandoffPending(true);
+    setActiveCampaignPresenceError(null);
+    try {
+      await Promise.all(
+        recipientIds.map((recipientId) =>
+          requestCampaignHandoff(
+            supabase,
+            activeWorkspaceId,
+            selectedCampaign.id,
+            recipientId
+          )
+        )
+      );
+      const recipientsSummary =
+        activeCampaignPresenceLabels.length > 0
+          ? activeCampaignPresenceLabels.join(", ")
+          : `${recipientIds.length} collaborator${
+              recipientIds.length === 1 ? "" : "s"
+            }`;
+      showRequestHandoffNotice(`Handoff request sent to ${recipientsSummary}.`);
+    } catch (error) {
+      setActiveCampaignPresenceError(normalizeHandoffErrorMessage(error));
+    } finally {
+      setRequestHandoffPending(false);
+    }
+  }
+
+  async function respondToIncomingHandoffRequest(
+    request: CloudIncomingHandoffRequest,
+    action: "accepted" | "declined"
+  ) {
+    if (!supabase) return;
+    setRespondHandoffPendingId(request.id);
+    setIncomingHandoffRequestsError(null);
+    try {
+      await respondCampaignHandoffRequest(supabase, request.id, action);
+      setIncomingHandoffRequests((prev) =>
+        prev.filter((entry) => entry.id !== request.id)
+      );
+      if (action === "accepted") {
+        if (
+          request.workspaceId === activeWorkspaceId &&
+          request.campaignId === selectedCampaign?.id
+        ) {
+          setActiveCampaignHandoffReleased(true);
+          if (handoffReleaseTimeoutRef.current) {
+            window.clearTimeout(handoffReleaseTimeoutRef.current);
+          }
+          handoffReleaseTimeoutRef.current = window.setTimeout(() => {
+            setActiveCampaignHandoffReleased(false);
+            handoffReleaseTimeoutRef.current = null;
+          }, 45000);
+        }
+        await clearCampaignEditorPresence(
+          supabase,
+          request.workspaceId,
+          request.campaignId
+        ).catch(() => {
+          // noop: best-effort release.
+        });
+        const requesterLabel = presenceLabelFromIdentity({
+          displayName: request.fromDisplayName,
+          email: request.fromEmail,
+        });
+        showRequestHandoffNotice(`Editing handed off to ${requesterLabel}.`);
+      }
+    } catch (error) {
+      setIncomingHandoffRequestsError(normalizeHandoffErrorMessage(error));
+    } finally {
+      setRespondHandoffPendingId(null);
+    }
+  }
 
   // ── Media helpers ──────────────────────────────────────────────
 
@@ -3997,7 +4249,7 @@ export default function WorkspaceEditorApp() {
 
   async function setMediaFromFile(campaignId: string, file: File) {
     if (activeCampaignEditingLocked && selectedCampaign?.id === campaignId) {
-      alert("Another collaborator is editing this ad. Use Take Over in the editor to upload media.");
+      alert("Another collaborator is editing this ad. Request handoff in the editor to upload media.");
       return;
     }
     if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) {
@@ -7171,6 +7423,7 @@ export default function WorkspaceEditorApp() {
     const title = effectiveProfileDisplayName || fallbackName;
     const settingsDirty =
       profileDisplayNameDraft.trim() !== profileDisplayNameSaved.trim() ||
+      profileStatusDraft !== profileStatusSaved ||
       (profileImageDataUrl ?? null) !== (profileImageDataUrlSaved ?? null);
 
     return (
@@ -7181,17 +7434,7 @@ export default function WorkspaceEditorApp() {
           <div className="context-header-meta">
             Update your display name and profile image.
           </div>
-          {inModal && (
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
-              <button
-                className="btn btn-secondary btn-sm"
-                type="button"
-                onClick={() => setShowUserSettings(false)}
-              >
-                Close
-              </button>
-            </div>
-          )}
+          {inModal && <div style={{ minHeight: 4 }} />}
         </div>
 
         <div className="form-section" style={{ overflowY: "auto" }}>
@@ -7246,6 +7489,16 @@ export default function WorkspaceEditorApp() {
           </div>
 
           <div className="form-group">
+            <label className="form-label">Status</label>
+            <input
+              className="form-input"
+              value={profileStatusDraft}
+              onChange={(e) => setProfileStatusDraft(e.target.value)}
+              placeholder="What's your status?"
+            />
+          </div>
+
+          <div className="form-group">
             <label className="form-label">Login Email</label>
             <input
               className="form-input"
@@ -7285,6 +7538,7 @@ export default function WorkspaceEditorApp() {
               type="button"
               onClick={() => {
                 setProfileDisplayNameDraft(profileDisplayNameSaved);
+                setProfileStatusDraft(profileStatusSaved);
                 setProfileImageDataUrl(profileImageDataUrlSaved);
               }}
               disabled={!settingsDirty || profileSettingsSaving}
@@ -7319,6 +7573,15 @@ export default function WorkspaceEditorApp() {
           aria-modal="true"
           aria-label="User settings"
         >
+          <button
+            type="button"
+            className="user-settings-close-x"
+            onClick={() => setShowUserSettings(false)}
+            aria-label="Close user settings"
+            title="Close"
+          >
+            ×
+          </button>
           {renderUserSettingsView({ modal: true })}
         </div>
       </>
@@ -7719,12 +7982,25 @@ export default function WorkspaceEditorApp() {
     const engagementRollKey = engagementRollNonce[campaign.id] ?? 0;
     const showPresenceCard =
       cloudEnabled && !activeWorkspaceIsLocal && activeCampaignHasPresenceLock;
+    const activeIncomingHandoffRequest = incomingHandoffRequests[0] ?? null;
+    const hasIncomingHandoffRequest = Boolean(activeIncomingHandoffRequest);
+    const showPresenceOverlayStack =
+      showPresenceCard ||
+      hasIncomingHandoffRequest ||
+      Boolean(incomingHandoffRequestsError) ||
+      Boolean(requestHandoffNotice);
     const editorsSummary =
       activeCampaignPresenceLabels.length > 0
         ? activeCampaignPresenceLabels.join(", ")
         : `${activeCampaignPresenceOthers.length} collaborator${
             activeCampaignPresenceOthers.length === 1 ? "" : "s"
           }`;
+    const incomingRequesterLabel = activeIncomingHandoffRequest
+      ? presenceLabelFromIdentity({
+          displayName: activeIncomingHandoffRequest.fromDisplayName,
+          email: activeIncomingHandoffRequest.fromEmail,
+        })
+      : "Another collaborator";
 
     function commitCtaColorDraft() {
       const normalized = normalizeHexInput(ctaColorDraft);
@@ -7748,62 +8024,218 @@ export default function WorkspaceEditorApp() {
       primaryGoal: project.primaryGoal,
       cta: campaign.cta,
     });
+    const isEditingCampaignTitle = editingCampaignTitleId === campaign.id;
+
+    function beginCampaignTitleEdit() {
+      if (activeCampaignEditingLocked) return;
+      setEditingCampaignTitleId(campaign.id);
+      setEditingCampaignTitleDraft(campaign.name);
+    }
+
+    function cancelCampaignTitleEdit() {
+      setEditingCampaignTitleId(null);
+      setEditingCampaignTitleDraft(campaign.name);
+    }
+
+    function commitCampaignTitleEdit() {
+      const trimmed = editingCampaignTitleDraft.trim();
+      if (trimmed && trimmed !== campaign.name) {
+        updateCampaign({ name: trimmed });
+      } else {
+        setEditingCampaignTitleDraft(campaign.name);
+      }
+      setEditingCampaignTitleId(null);
+    }
 
     return (
       <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
         <div className="pane-body">
+          <div className="campaign-pane-utility">
+            <div className="campaign-utility-row">
+              <div className="campaign-utility-title-wrap">
+                {isEditingCampaignTitle ? (
+                  <input
+                    className="campaign-utility-title-input"
+                    value={editingCampaignTitleDraft}
+                    onChange={(e) => setEditingCampaignTitleDraft(e.target.value)}
+                    onBlur={commitCampaignTitleEdit}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        commitCampaignTitleEdit();
+                      } else if (e.key === "Escape") {
+                        e.preventDefault();
+                        cancelCampaignTitleEdit();
+                      }
+                    }}
+                    autoFocus
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="campaign-utility-title-button"
+                    onDoubleClick={beginCampaignTitleEdit}
+                    disabled={activeCampaignEditingLocked}
+                    title={activeCampaignEditingLocked ? "Locked by active collaborator" : "Double-click to rename"}
+                  >
+                    {campaign.name || "Untitled Ad"}
+                  </button>
+                )}
+              </div>
+              <div className="campaign-utility-actions">
+                {copyLinkFlash && <span className="copy-success">Link copied!</span>}
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={copyCurrentCampaignLink}
+                  disabled={!canCopyCampaignLink}
+                  title={
+                    canCopyCampaignLink
+                      ? "Copy shareable ad link"
+                      : "Ad links are available for shared/cloud workspaces."
+                  }
+                >
+                  Copy Link
+                </button>
+                <button
+                  className={`btn btn-sm ${campaignStatusButtonClass(campaign.status)}`}
+                  disabled={activeCampaignEditingLocked}
+                  onClick={() =>
+                    updateCampaign({
+                      status: nextCampaignStatus(campaign.status),
+                    })
+                  }
+                >
+                  <div className={`status-dot status-dot-${campaign.status}`} />
+                  {campaignStatusLabel(campaign.status)}
+                </button>
+              </div>
+            </div>
+          </div>
           {/* Ad Editor (only mode now — campaign settings live on project view) */}
             <div className="form-section">
-              {showPresenceCard && (
-                <div
-                  className="info-stat-block"
-                  style={{
-                    padding: 12,
-                    gap: 8,
-                    border: "1px solid var(--danger-soft)",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 8,
-                    }}
-                  >
+              {showPresenceOverlayStack && (
+                <div className="campaign-presence-overlay-stack">
+                  {showPresenceCard && (
                     <div
+                      className="info-stat-block campaign-presence-overlay-card"
                       style={{
-                        fontSize: 12,
-                        fontWeight: 700,
-                        color: "var(--danger)",
+                        padding: 12,
+                        gap: 8,
+                        border: "1px solid var(--danger-soft)",
                       }}
                     >
-                      Someone else is editing
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 12,
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <span
+                            style={{
+                              width: 26,
+                              height: 26,
+                              borderRadius: 999,
+                              border: "1px solid var(--danger-soft)",
+                              color: "var(--danger)",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
+                          >
+                            <IconUser />
+                          </span>
+                          <div style={{ fontSize: 13, color: "var(--ink-2)" }}>
+                            {`${editorsSummary} ${
+                              activeCampaignPresenceOthers.length === 1 ? "is" : "are"
+                            } editing this ad right now.`}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn btn-danger btn-xs"
+                          disabled={requestHandoffPending}
+                          onClick={() => void requestActiveCampaignHandoff()}
+                        >
+                          {requestHandoffPending ? "Requesting..." : "Request Handoff"}
+                        </button>
+                      </div>
+                      {activeCampaignPresenceError && (
+                        <div style={{ fontSize: 12, color: "var(--danger)" }}>
+                          {activeCampaignPresenceError}
+                        </div>
+                      )}
                     </div>
-                    <button
-                      type="button"
-                      className={`btn btn-xs ${
-                        activeCampaignPresenceOverride ? "btn-secondary" : "btn-danger"
-                      }`}
-                      onClick={() =>
-                        setActiveCampaignPresenceOverride((previous) => !previous)
-                      }
+                  )}
+                  {hasIncomingHandoffRequest && activeIncomingHandoffRequest && (
+                    <div
+                      className="info-stat-block campaign-presence-overlay-card"
+                      style={{
+                        padding: 12,
+                        gap: 8,
+                        border: "1px solid var(--line)",
+                      }}
                     >
-                      {activeCampaignPresenceOverride ? "Release Override" : "Take Over"}
-                    </button>
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
-                    {activeCampaignPresenceOverride
-                      ? `Overriding while ${editorsSummary} ${
-                          activeCampaignPresenceOthers.length === 1 ? "is" : "are"
-                        } editing this ad right now.`
-                      : `${editorsSummary} ${
-                          activeCampaignPresenceOthers.length === 1 ? "is" : "are"
-                        } editing this ad right now.`}
-                  </div>
-                  {activeCampaignPresenceError && (
-                    <div style={{ fontSize: 12, color: "var(--danger)" }}>
-                      {activeCampaignPresenceError}
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 12,
+                        }}
+                      >
+                        <div style={{ fontSize: 13, color: "var(--ink-2)" }}>
+                          {incomingRequesterLabel} requested editing handoff.
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-xs"
+                            disabled={respondHandoffPendingId === activeIncomingHandoffRequest.id}
+                            onClick={() =>
+                              void respondToIncomingHandoffRequest(
+                                activeIncomingHandoffRequest,
+                                "declined"
+                              )
+                            }
+                          >
+                            Not now
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-xs"
+                            disabled={respondHandoffPendingId === activeIncomingHandoffRequest.id}
+                            onClick={() =>
+                              void respondToIncomingHandoffRequest(
+                                activeIncomingHandoffRequest,
+                                "accepted"
+                              )
+                            }
+                          >
+                            {respondHandoffPendingId === activeIncomingHandoffRequest.id
+                              ? "Sending..."
+                              : "Hand Off"}
+                          </button>
+                        </div>
+                      </div>
+                      {incomingHandoffRequests.length > 1 && (
+                        <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+                          {incomingHandoffRequests.length - 1} additional pending request
+                          {incomingHandoffRequests.length - 1 === 1 ? "" : "s"}.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {incomingHandoffRequestsError && (
+                    <div className="campaign-presence-overlay-note campaign-presence-overlay-note-danger">
+                      {incomingHandoffRequestsError}
+                    </div>
+                  )}
+                  {requestHandoffNotice && (
+                    <div className="campaign-presence-overlay-note">
+                      {requestHandoffNotice}
                     </div>
                   )}
                 </div>
@@ -7815,224 +8247,117 @@ export default function WorkspaceEditorApp() {
                 disabled={activeCampaignEditingLocked}
                 style={{ border: "none", margin: 0, padding: 0, minInlineSize: 0 }}
               >
-              <div className="form-group">
-                <label className="form-label">Name</label>
-                <input
-                  className="form-input"
-                  value={campaign.name}
-                  onChange={(e) => updateCampaign({ name: e.target.value })}
-                  placeholder="Name"
-                />
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label className="form-label">Platform</label>
-                  <div className="form-select-wrap">
-                    <select
-                      className="form-select"
-                      value={campaign.platform}
-                      onChange={(e) => {
-                        const p = e.target.value as Platform;
-                        updateCampaign({
-                          platform: p,
-                          mediaAspect: normalizeAspect(p, campaign.mediaAspect),
-                        });
-                      }}
-                    >
-                      {PLATFORM_OPTIONS.map((p) => (
-                        <option key={p} value={p}>{p}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Format</label>
-                  {isStoryPlatform(campaign.platform) ? (
-                    <input
-                      className="form-input"
-                      value="9:16 (Story)"
-                      readOnly
-                    />
-                  ) : (
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">Platform</label>
                     <div className="form-select-wrap">
                       <select
                         className="form-select"
-                        value={campaign.mediaAspect}
-                        onChange={(e) =>
-                          updateCampaign({ mediaAspect: e.target.value as MediaAspect })
-                        }
+                        value={campaign.platform}
+                        onChange={(e) => {
+                          const p = e.target.value as Platform;
+                          updateCampaign({
+                            platform: p,
+                            mediaAspect: normalizeAspect(p, campaign.mediaAspect),
+                          });
+                        }}
                       >
-                        {FEED_ASPECT_OPTIONS.map((a) => (
-                          <option key={a} value={a}>{a}</option>
+                        {PLATFORM_OPTIONS.map((p) => (
+                          <option key={p} value={p}>{p}</option>
                         ))}
                       </select>
                     </div>
-                  )}
-                </div>
-              </div>
-
-              {(isInstagramFeed || isFacebookFeed || isInstagramReels) && (
-                <div className="form-group">
-                  <label className="form-label">Engagement</label>
-                  <div className="engagement-dice-row">
-                    <button
-                      type="button"
-                      className="engagement-dice-btn"
-                      onClick={() => {
-                        const nextPreset = nextEngagementPreset(engagement.preset);
-                        setEngagementSettings((prev) => ({
-                          ...prev,
-                          [engagementKey]: {
-                            preset: nextPreset,
-                            seed: randomEngagementSeed(),
-                          },
-                        }));
-                        setEngagementRollNonce((prev) => ({
-                          ...prev,
-                          [campaign.id]: (prev[campaign.id] ?? 0) + 1,
-                        }));
-                      }}
-                      title="Cycle engagement level and randomize metrics"
-                      aria-label={`Engagement ${engagementPresetLabel(
-                        engagement.preset
-                      )}. Click to cycle and randomize.`}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        key={`${campaign.id}-${engagementRollKey}`}
-                        src={ENGAGEMENT_DICE_ICON[engagement.preset]}
-                        alt=""
-                        aria-hidden="true"
-                        className={`engagement-dice-icon${
-                          engagementRollKey > 0 ? " engagement-dice-icon-roll" : ""
-                        }`}
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Format</label>
+                    {isStoryPlatform(campaign.platform) ? (
+                      <input
+                        className="form-input"
+                        value="9:16 (Story)"
+                        readOnly
                       />
-                    </button>
-                    <span className="engagement-dice-label">
-                      {engagementPresetLabel(engagement.preset)}
-                    </span>
+                    ) : (
+                      <div className="form-select-wrap">
+                        <select
+                          className="form-select"
+                          value={campaign.mediaAspect}
+                          onChange={(e) =>
+                            updateCampaign({ mediaAspect: e.target.value as MediaAspect })
+                          }
+                        >
+                          {FEED_ASPECT_OPTIONS.map((a) => (
+                            <option key={a} value={a}>{a}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
                 </div>
-              )}
 
-              {audienceOptions.length > 0 && (
                 <div className="form-group">
-                  <label className="form-label">Audience</label>
-                  <div className="form-select-wrap">
-                    <select
-                      className="form-select"
-                      value={campaign.audienceProfile}
-                      onChange={(e) =>
-                        updateCampaign({ audienceProfile: e.target.value })
-                      }
-                    >
-                      <option value="">— none —</option>
-                      {audienceOptions.map((a) => (
-                        <option key={a} value={a}>{a}</option>
-                      ))}
-                    </select>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                    <label className="form-label" style={{ margin: 0 }}>Body Copy</label>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      {copyFlash && <span className="copy-success">Copied!</span>}
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => {
+                          copyTextWithFeedback(campaign.primaryText, () => {
+                            setCopyFlash(true);
+                            setTimeout(() => setCopyFlash(false), 1200);
+                          });
+                        }}
+                      >
+                        Copy
+                      </button>
+                    </div>
                   </div>
+                  <textarea
+                    className="form-textarea"
+                    rows={6}
+                    value={campaign.primaryText}
+                    onChange={(e) => updateCampaign({ primaryText: e.target.value })}
+                    placeholder="Start writing…"
+                  />
                 </div>
-              )}
 
-              {pillarOptions.length > 0 && (
-                <div className="form-group">
-                  <label className="form-label">Message Pillar</label>
-                  <div className="form-select-wrap">
-                    <select
-                      className="form-select"
-                      value={campaign.messagePillar}
-                      onChange={(e) =>
-                        updateCampaign({ messagePillar: e.target.value })
-                      }
-                    >
-                      <option value="">— none —</option>
-                      {pillarOptions.map((p) => (
-                        <option key={p} value={p}>{p}</option>
-                      ))}
-                    </select>
+                {isFacebookFeed && (
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label className="form-label">Page Name</label>
+                      <input
+                        className="form-input"
+                        value={campaign.facebookPageName}
+                        onChange={(e) => updateCampaign({ facebookPageName: e.target.value })}
+                        placeholder=" "
+                      />
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              <div className="form-group">
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                  <label className="form-label" style={{ margin: 0 }}>Body Copy</label>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    {copyLinkFlash && <span className="copy-success">Link copied!</span>}
-                    {copyFlash && <span className="copy-success">Copied!</span>}
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => {
-                        copyTextWithFeedback(campaign.primaryText, () => {
-                          setCopyFlash(true);
-                          setTimeout(() => setCopyFlash(false), 1200);
-                        });
-                      }}
-                    >
-                      Copy
-                    </button>
-                    <button
-                      className="btn btn-ghost btn-sm"
-                      onClick={copyCurrentCampaignLink}
-                      disabled={!canCopyCampaignLink}
-                      title={
-                        canCopyCampaignLink
-                          ? "Copy shareable ad link"
-                          : "Ad links are available for shared/cloud workspaces."
-                      }
-                    >
-                      Copy Link
-                    </button>
+                {isFacebookFeed && (
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label className="form-label">Headline</label>
+                      <input
+                        className="form-input"
+                        value={campaign.headline}
+                        onChange={(e) => updateCampaign({ headline: e.target.value })}
+                        placeholder=" "
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">URL</label>
+                      <input
+                        className="form-input"
+                        value={campaign.url}
+                        onChange={(e) => updateCampaign({ url: e.target.value })}
+                        placeholder="e.g. example.com/product"
+                      />
+                    </div>
                   </div>
-                </div>
-                <textarea
-                  className="form-textarea"
-                  rows={6}
-                  value={campaign.primaryText}
-                  onChange={(e) => updateCampaign({ primaryText: e.target.value })}
-                  placeholder="Start writing…"
-                />
-              </div>
+                )}
 
-              {isFacebookFeed && (
-                <div className="form-row">
-                  <div className="form-group">
-                    <label className="form-label">Page Name</label>
-                    <input
-                      className="form-input"
-                      value={campaign.facebookPageName}
-                      onChange={(e) => updateCampaign({ facebookPageName: e.target.value })}
-                      placeholder=" "
-                    />
-                  </div>
-                </div>
-              )}
-
-              {isFacebookFeed && (
-                <div className="form-row">
-                  <div className="form-group">
-                    <label className="form-label">Headline</label>
-                    <input
-                      className="form-input"
-                      value={campaign.headline}
-                      onChange={(e) => updateCampaign({ headline: e.target.value })}
-                      placeholder=" "
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">URL</label>
-                    <input
-                      className="form-input"
-                      value={campaign.url}
-                      onChange={(e) => updateCampaign({ url: e.target.value })}
-                      placeholder="e.g. example.com/product"
-                    />
-                  </div>
-                </div>
-              )}
-
-              <div className="form-row">
                 <div className="form-group">
                   <label className="form-label">
                     {isInstagramStory ? "Call to Action Text" : "Call to Action"}
@@ -8060,96 +8385,162 @@ export default function WorkspaceEditorApp() {
                     </div>
                   )}
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Color</label>
-                  <div className="color-row">
-                    <label className="color-swatch" title="Pick color">
-                      <input
-                        type="color"
-                        value={campaign.ctaBgColor}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setCtaColorDrafts((prev) => ({
-                            ...prev,
-                            [campaign.id]: v,
-                          }));
-                          updateCampaign({
-                            ctaBgColor: v,
-                            ctaTextColor: contrastText(v),
-                          });
-                        }}
-                      />
-                    </label>
-                    <input
-                      className="form-input"
-                      value={ctaColorDraft}
-                      onChange={(e) =>
-                        setCtaColorDrafts((prev) => ({
-                          ...prev,
-                          [campaign.id]: e.target.value,
-                        }))
-                      }
-                      onBlur={commitCtaColorDraft}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          commitCtaColorDraft();
-                        } else if (e.key === "Escape") {
-                          setCtaColorDrafts((prev) => ({
-                            ...prev,
-                            [campaign.id]: campaign.ctaBgColor,
-                          }));
-                        }
-                      }}
-                      placeholder="#f2f2f2"
-                      style={{ fontFamily: "var(--font-mono, monospace)", fontSize: 13 }}
-                    />
-                  </div>
-                </div>
-              </div>
 
-              {isInstagramStory && (
-                <div className="form-group">
-                  <label
-                    className="form-label"
-                    style={{ display: "flex", alignItems: "center", gap: 8 }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={campaign.ctaVisible}
-                      onChange={(e) =>
-                        updateCampaign({ ctaVisible: e.target.checked })
-                      }
-                    />
-                    Show CTA
-                  </label>
-                </div>
-              )}
+                <details className="campaign-advanced">
+                  <summary className="campaign-advanced-summary">
+                    Advanced formatting
+                  </summary>
+                  <div className="campaign-advanced-body">
+                    {(isInstagramFeed || isFacebookFeed || isInstagramReels) && (
+                      <div className="form-group">
+                        <label className="form-label">Engagement</label>
+                        <div className="engagement-dice-row">
+                          <button
+                            type="button"
+                            className="engagement-dice-btn"
+                            onClick={() => {
+                              const nextPreset = nextEngagementPreset(engagement.preset);
+                              setEngagementSettings((prev) => ({
+                                ...prev,
+                                [engagementKey]: {
+                                  preset: nextPreset,
+                                  seed: randomEngagementSeed(),
+                                },
+                              }));
+                              setEngagementRollNonce((prev) => ({
+                                ...prev,
+                                [campaign.id]: (prev[campaign.id] ?? 0) + 1,
+                              }));
+                            }}
+                            title="Cycle engagement level and randomize metrics"
+                            aria-label={`Engagement ${engagementPresetLabel(
+                              engagement.preset
+                            )}. Click to cycle and randomize.`}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              key={`${campaign.id}-${engagementRollKey}`}
+                              src={ENGAGEMENT_DICE_ICON[engagement.preset]}
+                              alt=""
+                              aria-hidden="true"
+                              className={`engagement-dice-icon${
+                                engagementRollKey > 0 ? " engagement-dice-icon-roll" : ""
+                              }`}
+                            />
+                          </button>
+                          <span className="engagement-dice-label">
+                            {engagementPresetLabel(engagement.preset)}
+                          </span>
+                        </div>
+                      </div>
+                    )}
 
-              {/* Status toggle */}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingTop: 4 }}>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink-2)" }}>
-                    Status
+                    {audienceOptions.length > 0 && (
+                      <div className="form-group">
+                        <label className="form-label">Audience</label>
+                        <div className="form-select-wrap">
+                          <select
+                            className="form-select"
+                            value={campaign.audienceProfile}
+                            onChange={(e) =>
+                              updateCampaign({ audienceProfile: e.target.value })
+                            }
+                          >
+                            <option value="">— none —</option>
+                            {audienceOptions.map((a) => (
+                              <option key={a} value={a}>{a}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
+                    {pillarOptions.length > 0 && (
+                      <div className="form-group">
+                        <label className="form-label">Message Pillar</label>
+                        <div className="form-select-wrap">
+                          <select
+                            className="form-select"
+                            value={campaign.messagePillar}
+                            onChange={(e) =>
+                              updateCampaign({ messagePillar: e.target.value })
+                            }
+                          >
+                            <option value="">— none —</option>
+                            {pillarOptions.map((p) => (
+                              <option key={p} value={p}>{p}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="form-group">
+                      <label className="form-label">CTA Color</label>
+                      <div className="color-row">
+                        <label className="color-swatch" title="Pick color">
+                          <input
+                            type="color"
+                            value={campaign.ctaBgColor}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setCtaColorDrafts((prev) => ({
+                                ...prev,
+                                [campaign.id]: v,
+                              }));
+                              updateCampaign({
+                                ctaBgColor: v,
+                                ctaTextColor: contrastText(v),
+                              });
+                            }}
+                          />
+                        </label>
+                        <input
+                          className="form-input"
+                          value={ctaColorDraft}
+                          onChange={(e) =>
+                            setCtaColorDrafts((prev) => ({
+                              ...prev,
+                              [campaign.id]: e.target.value,
+                            }))
+                          }
+                          onBlur={commitCtaColorDraft}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              commitCtaColorDraft();
+                            } else if (e.key === "Escape") {
+                              setCtaColorDrafts((prev) => ({
+                                ...prev,
+                                [campaign.id]: campaign.ctaBgColor,
+                              }));
+                            }
+                          }}
+                          placeholder="#f2f2f2"
+                          style={{ fontFamily: "var(--font-mono, monospace)", fontSize: 13 }}
+                        />
+                      </div>
+                    </div>
+
+                    {isInstagramStory && (
+                      <div className="form-group">
+                        <label
+                          className="form-label"
+                          style={{ display: "flex", alignItems: "center", gap: 8 }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={campaign.ctaVisible}
+                            onChange={(e) =>
+                              updateCampaign({ ctaVisible: e.target.checked })
+                            }
+                          />
+                          Show CTA
+                        </label>
+                      </div>
+                    )}
                   </div>
-                  <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                    Click to cycle draft, ready, approved
-                  </div>
-                </div>
-                <button
-                  className={`btn btn-sm ${campaignStatusButtonClass(campaign.status)}`}
-                  onClick={() =>
-                    updateCampaign({
-                      status: nextCampaignStatus(campaign.status),
-                    })
-                  }
-                >
-                  <div
-                    className={`status-dot status-dot-${campaign.status}`}
-                  />
-                  {campaignStatusLabel(campaign.status)}
-                </button>
-              </div>
+                </details>
               </fieldset>
             </div>
         </div>
@@ -8211,7 +8602,9 @@ export default function WorkspaceEditorApp() {
             disabled={previewEditingLocked}
             title={
               previewEditingLocked
-                ? "Another collaborator is actively editing this ad."
+                ? activeCampaignHandoffReleased
+                  ? "You handed off editing on this ad."
+                  : "Another collaborator is actively editing this ad."
                 : "Upload media"
             }
           >
@@ -8219,7 +8612,9 @@ export default function WorkspaceEditorApp() {
           </button>
           {previewEditingLocked && (
             <span style={{ fontSize: 12, color: "var(--danger)", fontWeight: 600 }}>
-              Locked by active collaborator
+              {activeCampaignHandoffReleased
+                ? "Editing handed off"
+                : "Locked by active collaborator"}
             </span>
           )}
           {selectedMedia.kind !== "none" && (
@@ -9066,44 +9461,36 @@ export default function WorkspaceEditorApp() {
       )}
 
       {cloudEnabled && !activeWorkspaceIsLocal && activeWorkspaceSyncConflict && (
-        <div
-          style={{
-            margin: "10px 16px 0",
-            border: "1px solid var(--line)",
-            background: "var(--pane)",
-            borderRadius: 10,
-            padding: "10px 12px",
-            display: "flex",
-            gap: 10,
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
-        >
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--danger)" }}>
-              Save conflict detected
+        <div className="workspace-conflict-overlay" role="alert">
+          <div className="workspace-conflict-card">
+            <div className="workspace-conflict-copy">
+              <div className="workspace-conflict-title">
+                Choose how to resolve your changes
+              </div>
+              <div className="workspace-conflict-text">
+                This workspace changed in another session. You can discard your local edits
+                and load the latest cloud version, or keep your edits and save them to cloud.
+              </div>
+              <div className="workspace-conflict-detail">{activeWorkspaceSyncConflict}</div>
             </div>
-            <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
-              {activeWorkspaceSyncConflict}
+            <div className="workspace-conflict-actions">
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  void reloadActiveWorkspaceFromCloud();
+                }}
+              >
+                Discard my changes
+              </button>
+              <button
+                className="btn btn-danger btn-sm"
+                onClick={() => {
+                  void overwriteActiveWorkspaceWithLocal();
+                }}
+              >
+                Save my changes
+              </button>
             </div>
-          </div>
-          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={() => {
-                void reloadActiveWorkspaceFromCloud();
-              }}
-            >
-              Reload Remote
-            </button>
-            <button
-              className="btn btn-danger btn-sm"
-              onClick={() => {
-                void overwriteActiveWorkspaceWithLocal();
-              }}
-            >
-              Overwrite Remote
-            </button>
           </div>
         </div>
       )}

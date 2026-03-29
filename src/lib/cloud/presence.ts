@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export type CloudEditorPresence = {
   userId: string;
   email: string | null;
+  displayName: string | null;
   expiresAt: string;
   isSelf: boolean;
 };
@@ -77,6 +78,7 @@ export async function listCampaignEditorPresence(
     .map((row) => ({
       userId: typeof row.user_id === "string" ? row.user_id : "",
       email: typeof row.email === "string" ? row.email : null,
+      displayName: typeof row.display_name === "string" ? row.display_name : null,
       expiresAt:
         typeof row.expires_at === "string" ? row.expires_at : new Date().toISOString(),
       isSelf: row.is_self === true,
