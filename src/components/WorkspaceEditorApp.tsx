@@ -6917,9 +6917,10 @@ export default function WorkspaceEditorApp() {
                           {isWorkspaceActive && (
                             <button
                               className="tree-add-row tree-add-row-project"
+                              aria-label={`Add project to ${client.name}`}
                               onClick={() => addProject(client.id)}
                             >
-                              <IconPlus /> New Project
+                              <IconPlus /> Add Project
                             </button>
                           )}
                         </div>

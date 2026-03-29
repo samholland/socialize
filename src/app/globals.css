@@ -545,10 +545,7 @@ html, body {
 }
 
 .tree-add-row-project {
-  margin-top: 0;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  border-top: 1px solid var(--line);
+  margin-top: 4px;
 }
 
 .tree-row-client,
@@ -623,7 +620,6 @@ html, body {
 
 .tree-row-project {
   padding-left: 26px;
-  background: var(--tree-project-header-bg);
 }
 
 .tree-row-campaign {
@@ -735,7 +731,6 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  background: var(--tree-nested-bg);
 }
 
 .tree-client-children-inner {
@@ -744,7 +739,6 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  background: var(--tree-nested-bg);
 }
 
 /* Row hover actions */
@@ -935,15 +929,15 @@ html, body {
 .tree-add-row-project,
 .tree-add-row-campaign { color: var(--muted); font-size: 12.5px}
 .tree-add-row-project {
-  padding-left: 26px;
-  font-weight: 700;
-  padding-top: 10px;
-  font-size: 11.5px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--line);
-  border-top: 1px solid var(--line);
-  border-radius: 0;
-  margin-top: 0;
+  padding-left: 44px;
+  font-weight: 500;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  border: none;
+  border-radius: var(--r-sm);
+  margin: 2px 0 4px;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .tree-add-row-campaign {
@@ -966,8 +960,7 @@ html, body {
 }
 
 [data-theme="dark"] .tree-row-client,
-[data-theme="dark"] .tree-row-project,
-[data-theme="dark"] .tree-add-row-project {
+[data-theme="dark"] .tree-row-project {
   border-bottom-color: rgba(255, 255, 255, 0.12);
 }
 
