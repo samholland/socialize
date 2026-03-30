@@ -2,6 +2,7 @@ import {
   FRAME_IMAGE_PATH,
   STORY_ICON_PATHS,
   STORY_REELS_NAV_ICON_PATHS,
+  STORY_TIKTOK_ICON_PATHS,
 } from "./constants";
 import type { StorySceneModel } from "./sceneModel";
 import type { StoryExportAssets } from "./types";
@@ -43,6 +44,16 @@ export async function loadStoryExportAssets(
     navSendIcon,
     navSearchIcon,
     navProfileBlankIcon,
+    tiktokAddIcon,
+    tiktokLikeIcon,
+    tiktokCommentIcon,
+    tiktokBookmarkIcon,
+    tiktokShareIcon,
+    tiktokHomeIcon,
+    tiktokDiscoverIcon,
+    tiktokPostIcon,
+    tiktokInboxIcon,
+    tiktokProfileIcon,
   ] =
     await Promise.all([
       loadImage(FRAME_IMAGE_PATH),
@@ -58,6 +69,16 @@ export async function loadStoryExportAssets(
       loadImage(STORY_REELS_NAV_ICON_PATHS.send),
       loadImage(STORY_REELS_NAV_ICON_PATHS.search),
       loadImage(STORY_REELS_NAV_ICON_PATHS.profileBlank),
+      loadImage(STORY_TIKTOK_ICON_PATHS.add),
+      loadImage(STORY_TIKTOK_ICON_PATHS.like),
+      loadImage(STORY_TIKTOK_ICON_PATHS.comment),
+      loadImage(STORY_TIKTOK_ICON_PATHS.bookmark),
+      loadImage(STORY_TIKTOK_ICON_PATHS.share),
+      loadImage(STORY_TIKTOK_ICON_PATHS.home),
+      loadImage(STORY_TIKTOK_ICON_PATHS.discover),
+      loadImage(STORY_TIKTOK_ICON_PATHS.post),
+      loadImage(STORY_TIKTOK_ICON_PATHS.inbox),
+      loadImage(STORY_TIKTOK_ICON_PATHS.profile),
     ]);
 
   return {
@@ -74,5 +95,15 @@ export async function loadStoryExportAssets(
     navSendIcon,
     navSearchIcon,
     navProfileBlankIcon,
+    tiktokAddIcon,
+    tiktokLikeIcon,
+    tiktokCommentIcon,
+    tiktokBookmarkIcon,
+    tiktokShareIcon,
+    tiktokHomeIcon,
+    tiktokDiscoverIcon,
+    tiktokPostIcon,
+    tiktokInboxIcon,
+    tiktokProfileIcon,
   };
 }

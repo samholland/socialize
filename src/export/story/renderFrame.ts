@@ -308,6 +308,8 @@ function drawShortVideoSurface(
       drawStoryStatusBar,
       drawStoryMedia,
       drawWrappedText,
+      drawTintedImage,
+      drawAvatar,
       fillRoundedRect,
       drawStoryCtaBar,
     },

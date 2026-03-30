@@ -27,6 +27,19 @@ export const STORY_REELS_NAV_ICON_PATHS = {
   profileBlank: "/images/ig_pfp_blank.svg",
 } as const;
 
+export const STORY_TIKTOK_ICON_PATHS = {
+  add: "/images/tiktok_add.svg",
+  like: "/images/tiktok_like.svg",
+  comment: "/images/tiktok_comment.svg",
+  bookmark: "/images/tiktok_bookmark.svg",
+  share: "/images/tiktok_share.svg",
+  home: "/images/tiktok_home.svg",
+  discover: "/images/tiktok_discover.svg",
+  post: "/images/tiktok_post.svg",
+  inbox: "/images/tiktok_inbox.svg",
+  profile: "/images/tiktok_profile.svg",
+} as const;
+
 export const STORY_LAYOUT = {
   mediaTop: 28,
   mediaBottom: 48,

@@ -10,6 +10,7 @@ import {
   FRAME_NATIVE,
   INSTAGRAM_FEED_OVERLAY_PATH,
   INSTAGRAM_REELS_OVERLAY_PATH,
+  TIKTOK_OVERLAY_PATH,
   SCREEN_NATIVE,
 } from "./preview-canvas/constants";
 import { drawFeedSurface } from "@/rendering/feed/renderFeedSurface";
@@ -427,7 +428,9 @@ export const PreviewCanvas = forwardRef<PreviewCanvasHandle, Props>(function Pre
           ? INSTAGRAM_REELS_OVERLAY_PATH
           : platformKey === "facebook feed"
             ? FACEBOOK_FEED_OVERLAY_PATH
-          : null;
+            : platformKey === "tiktok"
+              ? TIKTOK_OVERLAY_PATH
+              : null;
     if (includeDebugOverlays && instagramFeedOverlayEnabled && overlayPath) {
       const overlay = await loadImageFromUrl(overlayPath);
       if (overlay) drawInstagramOverlay(ctx, overlay);

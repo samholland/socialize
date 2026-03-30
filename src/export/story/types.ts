@@ -50,4 +50,14 @@ export type StoryExportAssets = {
   navSendIcon: HTMLImageElement | null;
   navSearchIcon: HTMLImageElement | null;
   navProfileBlankIcon: HTMLImageElement | null;
+  tiktokAddIcon: HTMLImageElement | null;
+  tiktokLikeIcon: HTMLImageElement | null;
+  tiktokCommentIcon: HTMLImageElement | null;
+  tiktokBookmarkIcon: HTMLImageElement | null;
+  tiktokShareIcon: HTMLImageElement | null;
+  tiktokHomeIcon: HTMLImageElement | null;
+  tiktokDiscoverIcon: HTMLImageElement | null;
+  tiktokPostIcon: HTMLImageElement | null;
+  tiktokInboxIcon: HTMLImageElement | null;
+  tiktokProfileIcon: HTMLImageElement | null;
 };

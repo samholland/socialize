@@ -1,6 +1,7 @@
 import {
   STORY_ICON_PATHS,
   STORY_REELS_NAV_ICON_PATHS,
+  STORY_TIKTOK_ICON_PATHS,
 } from "@/export/story/constants";
 import { renderStoryExportFrame } from "@/export/story/renderFrame";
 import { buildStorySceneModel } from "@/export/story/sceneModel";
@@ -87,6 +88,16 @@ export async function drawStoryLikeSurface({
     navSendIcon,
     navSearchIcon,
     navProfileBlankIcon,
+    tiktokAddIcon,
+    tiktokLikeIcon,
+    tiktokCommentIcon,
+    tiktokBookmarkIcon,
+    tiktokShareIcon,
+    tiktokHomeIcon,
+    tiktokDiscoverIcon,
+    tiktokPostIcon,
+    tiktokInboxIcon,
+    tiktokProfileIcon,
   ] = await Promise.all([
     loadImageFromUrl(scene.identity.clientAvatarUrl),
     scene.media.kind === "image" ? loadImageFromUrl(scene.media.url) : Promise.resolve(null),
@@ -100,6 +111,16 @@ export async function drawStoryLikeSurface({
     loadImageFromUrl(STORY_REELS_NAV_ICON_PATHS.send),
     loadImageFromUrl(STORY_REELS_NAV_ICON_PATHS.search),
     loadImageFromUrl(STORY_REELS_NAV_ICON_PATHS.profileBlank),
+    loadImageFromUrl(STORY_TIKTOK_ICON_PATHS.add),
+    loadImageFromUrl(STORY_TIKTOK_ICON_PATHS.like),
+    loadImageFromUrl(STORY_TIKTOK_ICON_PATHS.comment),
+    loadImageFromUrl(STORY_TIKTOK_ICON_PATHS.bookmark),
+    loadImageFromUrl(STORY_TIKTOK_ICON_PATHS.share),
+    loadImageFromUrl(STORY_TIKTOK_ICON_PATHS.home),
+    loadImageFromUrl(STORY_TIKTOK_ICON_PATHS.discover),
+    loadImageFromUrl(STORY_TIKTOK_ICON_PATHS.post),
+    loadImageFromUrl(STORY_TIKTOK_ICON_PATHS.inbox),
+    loadImageFromUrl(STORY_TIKTOK_ICON_PATHS.profile),
   ]);
 
   const assets: StoryExportAssets = {
@@ -116,6 +137,16 @@ export async function drawStoryLikeSurface({
     navSendIcon,
     navSearchIcon,
     navProfileBlankIcon,
+    tiktokAddIcon,
+    tiktokLikeIcon,
+    tiktokCommentIcon,
+    tiktokBookmarkIcon,
+    tiktokShareIcon,
+    tiktokHomeIcon,
+    tiktokDiscoverIcon,
+    tiktokPostIcon,
+    tiktokInboxIcon,
+    tiktokProfileIcon,
   };
 
   const mediaSource: StoryFrameMediaSource | undefined =

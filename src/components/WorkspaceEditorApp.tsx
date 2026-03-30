@@ -245,6 +245,7 @@ const PLATFORM_OPTIONS: Platform[] = [
   "Instagram Story",
   "Instagram Reels",
   "Facebook Feed",
+  "TikTok",
 ];
 const CTA_OPTIONS: CtaOption[] = [
   "Learn More",
@@ -296,6 +297,17 @@ const ENGAGEMENT_DICE_ICON: Record<EngagementPreset, string> = {
 };
 const DEFAULT_CTA_BG = "#f2f2f2";
 const EMPTY_MEDIA: PreviewMedia = { kind: "none" };
+const BODY_COPY_CHAR_LIMIT_BY_PLATFORM: Record<Platform, number> = {
+  "Instagram Feed": 2200,
+  "Instagram Story": 2200,
+  "Instagram Reels": 2200,
+  "Facebook Feed": 63206,
+  TikTok: 2200,
+};
+const FACEBOOK_PAGE_NAME_CHAR_LIMIT = 75;
+const FACEBOOK_HEADLINE_CHAR_LIMIT = 255;
+const FACEBOOK_URL_CHAR_LIMIT = 2048;
+const STORY_CTA_TEXT_CHAR_LIMIT = 30;
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
@@ -341,7 +353,7 @@ function engagementPresetLabel(preset: EngagementPreset): string {
 }
 
 function isStoryPlatform(p: Platform): boolean {
-  return p === "Instagram Story" || p === "Instagram Reels";
+  return p === "Instagram Story" || p === "Instagram Reels" || p === "TikTok";
 }
 
 function normalizeAspect(
@@ -398,11 +410,11 @@ function normalizePlatform(v: unknown): Platform {
     v === "Instagram Feed" ||
     v === "Instagram Story" ||
     v === "Instagram Reels" ||
-    v === "Facebook Feed"
+    v === "Facebook Feed" ||
+    v === "TikTok"
   ) {
     return v;
   }
-  if (v === "TikTok") return "Instagram Reels";
   return "Instagram Feed";
 }
 
@@ -547,6 +559,22 @@ function linesToList(v: string): string[] {
 
 function listToLines(v: string[]): string {
   return v.join("\n");
+}
+
+function characterCountMeta(value: string, limit: number): {
+  count: number;
+  remaining: number;
+  overBy: number;
+  isOver: boolean;
+} {
+  const count = value.length;
+  const remaining = limit - count;
+  return {
+    count,
+    remaining,
+    overBy: Math.max(0, -remaining),
+    isOver: remaining < 0,
+  };
 }
 
 function newCampaign(
@@ -8923,7 +8951,19 @@ export default function WorkspaceEditorApp() {
       cta: campaign.cta,
     });
     const primaryTextValue = selectedCampaignPrimaryText;
-    const bodyCopyCharacterCount = primaryTextValue.length;
+    const bodyCopyLimit =
+      BODY_COPY_CHAR_LIMIT_BY_PLATFORM[campaign.platform] ?? 2200;
+    const bodyCopyMeta = characterCountMeta(primaryTextValue, bodyCopyLimit);
+    const pageNameMeta = characterCountMeta(
+      campaign.facebookPageName,
+      FACEBOOK_PAGE_NAME_CHAR_LIMIT
+    );
+    const headlineMeta = characterCountMeta(
+      campaign.headline,
+      FACEBOOK_HEADLINE_CHAR_LIMIT
+    );
+    const urlMeta = characterCountMeta(campaign.url, FACEBOOK_URL_CHAR_LIMIT);
+    const storyCtaMeta = characterCountMeta(campaign.cta, STORY_CTA_TEXT_CHAR_LIMIT);
     const isEditingCampaignTitle = editingCampaignTitleId === campaign.id;
 
     function beginCampaignTitleEdit() {
@@ -8984,18 +9024,15 @@ export default function WorkspaceEditorApp() {
               </div>
               <div className="campaign-utility-actions">
                 {copyLinkFlash && <span className="copy-success">Link copied!</span>}
-                <button
-                  className="btn btn-ghost btn-sm"
-                  onClick={copyCurrentCampaignLink}
-                  disabled={!canCopyCampaignLink}
-                  title={
-                    canCopyCampaignLink
-                      ? "Copy shareable ad link"
-                      : "Ad links are available for shared/cloud workspaces."
-                  }
-                >
-                  Copy Link
-                </button>
+                {canCopyCampaignLink && (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={copyCurrentCampaignLink}
+                    title="Copy shareable ad link"
+                  >
+                    Copy Link
+                  </button>
+                )}
                 <button
                   className={`btn btn-sm ${campaignStatusButtonClass(campaign.status)}`}
                   disabled={activeCampaignEditingLocked}
@@ -9197,7 +9234,23 @@ export default function WorkspaceEditorApp() {
 
                 <div className="form-group body-copy-group">
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                    <label className="form-label" style={{ margin: 0 }}>Body Copy</label>
+                    <div
+                      className="form-label-row"
+                      style={{ margin: 0, minWidth: 0, flex: "1 1 auto" }}
+                    >
+                      <label className="form-label" style={{ margin: 0 }}>
+                        Body Copy
+                      </label>
+                      <span
+                        className={`form-label-counter${
+                          bodyCopyMeta.isOver ? " is-over" : ""
+                        }`}
+                      >
+                        {bodyCopyMeta.isOver
+                          ? `${bodyCopyMeta.overBy} over`
+                          : `${bodyCopyMeta.remaining} left`}
+                      </span>
+                    </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       {copyFlash && <span className="copy-success">Copied!</span>}
                       <button
@@ -9229,7 +9282,7 @@ export default function WorkspaceEditorApp() {
                       placeholder="Start writing…"
                     />
                     <div className="body-copy-meta">
-                      {bodyCopyCharacterCount} characters
+                      {bodyCopyMeta.count} / {bodyCopyLimit}
                     </div>
                   </div>
                 </div>
@@ -9237,7 +9290,18 @@ export default function WorkspaceEditorApp() {
                 {isFacebookFeed && (
                   <div className="form-row">
                     <div className="form-group">
-                      <label className="form-label">Page Name</label>
+                      <div className="form-label-row">
+                        <label className="form-label">Page Name</label>
+                        <span
+                          className={`form-label-counter${
+                            pageNameMeta.isOver ? " is-over" : ""
+                          }`}
+                        >
+                          {pageNameMeta.isOver
+                            ? `${pageNameMeta.overBy} over`
+                            : `${pageNameMeta.remaining} left`}
+                        </span>
+                      </div>
                       <input
                         className="form-input"
                         value={campaign.facebookPageName}
@@ -9251,7 +9315,18 @@ export default function WorkspaceEditorApp() {
                 {isFacebookFeed && (
                   <div className="form-row">
                     <div className="form-group">
-                      <label className="form-label">Headline</label>
+                      <div className="form-label-row">
+                        <label className="form-label">Headline</label>
+                        <span
+                          className={`form-label-counter${
+                            headlineMeta.isOver ? " is-over" : ""
+                          }`}
+                        >
+                          {headlineMeta.isOver
+                            ? `${headlineMeta.overBy} over`
+                            : `${headlineMeta.remaining} left`}
+                        </span>
+                      </div>
                       <input
                         className="form-input"
                         value={campaign.headline}
@@ -9260,7 +9335,16 @@ export default function WorkspaceEditorApp() {
                       />
                     </div>
                     <div className="form-group">
-                      <label className="form-label">URL</label>
+                      <div className="form-label-row">
+                        <label className="form-label">URL</label>
+                        <span
+                          className={`form-label-counter${
+                            urlMeta.isOver ? " is-over" : ""
+                          }`}
+                        >
+                          {urlMeta.isOver ? `${urlMeta.overBy} over` : `${urlMeta.remaining} left`}
+                        </span>
+                      </div>
                       <input
                         className="form-input"
                         value={campaign.url}
@@ -9272,9 +9356,22 @@ export default function WorkspaceEditorApp() {
                 )}
 
                 <div className="form-group">
-                  <label className="form-label">
-                    {isInstagramStory ? "Call to Action Text" : "Call to Action"}
-                  </label>
+                  <div className="form-label-row">
+                    <label className="form-label">
+                      {isInstagramStory ? "Call to Action Text" : "Call to Action"}
+                    </label>
+                    {isInstagramStory && (
+                      <span
+                        className={`form-label-counter${
+                          storyCtaMeta.isOver ? " is-over" : ""
+                        }`}
+                      >
+                        {storyCtaMeta.isOver
+                          ? `${storyCtaMeta.overBy} over`
+                          : `${storyCtaMeta.remaining} left`}
+                      </span>
+                    )}
+                  </div>
                   {isInstagramStory ? (
                     <input
                       className="form-input"
@@ -9478,7 +9575,7 @@ export default function WorkspaceEditorApp() {
     const campaign = selectedCampaign;
     const client = selectedClient;
     const engagement = engagementSettingForCampaign(campaign.id);
-    const isOverlayCampaign = false;
+    const isOverlayCampaign = campaign.platform === "TikTok";
     const storyOffsetKey = storyCtaOffsetKey(campaign.id);
     const storyOffset = storyCtaOffsets[storyOffsetKey] ?? { x: 0, y: 0 };
     const previewBackdropColor = normalizeHex(
@@ -9559,6 +9656,8 @@ export default function WorkspaceEditorApp() {
               title={
                 campaign.platform === "Instagram Reels"
                   ? "Overlay public/images/testing/overlay-reels.png"
+                  : campaign.platform === "TikTok"
+                    ? "Overlay public/images/testing/overlay-tiktok3.png"
                   : campaign.platform === "Facebook Feed"
                     ? "Overlay public/images/testing/overlay-facebook.png"
                   : "Overlay public/images/testing/overlay1.png"
